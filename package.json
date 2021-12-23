@@ -81,6 +81,7 @@
     "@uniswap/v3-sdk": "^3.5.1",
     "ethers": "^5.4.6",
     "fs-extra": "^5.0.0",
+    "hardhat-gas-reporter": "^1.0.6",
     "jsbi": "^3.2.5",
     "module-alias": "^2.2.2",
     "replace-in-file": "^6.1.0"
@@ -95,8 +96,7 @@
     "@typechain": "typechain"
   },
   "husky": {
-    "hooks": {
-    }
+    "hooks": {}
   },
   "lint-staged": {
     "contracts/**/*.sol": [

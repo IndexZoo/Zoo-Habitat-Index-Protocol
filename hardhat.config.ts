@@ -1,5 +1,7 @@
 require("dotenv").config();
 
+import 'hardhat-gas-reporter';
+
 import chalk from "chalk";
 import { HardhatUserConfig } from "hardhat/config";
 import { privateKeys } from "./utils/wallets";
@@ -71,6 +73,9 @@ const config: HardhatUserConfig = {
   // @ts-ignore
   externalGasMods: [
   ],
+  gasReporter: {
+    enabled: true
+  }
 };
 
 function getHardhatPrivateKeys() {
