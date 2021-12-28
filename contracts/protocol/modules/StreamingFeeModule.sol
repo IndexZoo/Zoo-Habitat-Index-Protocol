@@ -1,5 +1,5 @@
 /*
-    Copyright 2020 Set Labs Inc.
+    Copyright 2021 IndexTech Ltd.
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ import { PreciseUnitMath } from "../../lib/PreciseUnitMath.sol";
 
 /**
  * @title StreamingFeeModule
- * @author Set Protocol
+ * @author IndexTech Ltd.
  *
  * Smart contract that accrues streaming fees for Set managers. Streaming fees are denominated as percent
  * per year and realized as Set inflation rewarded to the manager.

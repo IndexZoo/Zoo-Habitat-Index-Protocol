@@ -44,7 +44,7 @@ await controller.addModule(streamingFeeModule.address)
 ```
  await integrationRegistry.addIntegration(tradeModule.address, "UNISWAP", uniswapV2ExchangeAdapter.address);
 ```
-- Create a tokenset of your chosed configuration
+- Create a tokenset of your chosen configuration
 ```
 await setTokenCreator.create([DEPLOYMENTS.rinkeby.WETH], [ether(0.02)], [basicIssuanceModule.address, tradeModule.address, streamingFeeModule.address], owner.address, "zk_idx", "Z02")  
 ```

@@ -1,5 +1,5 @@
 /*
-    Copyright 2020 Set Labs Inc.
+    Copyright 2021 IndexTech Ltd.
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ import { Uint256ArrayUtils } from "../../lib/Uint256ArrayUtils.sol";
 
 /**
  * @title SingleIndexModule
- * @author Set Protocol
+ * @author IndexTech Ltd.
  *
  * Smart contract that facilitates rebalances for indices. Manager can set target unit amounts, max trade sizes, the
  * exchange to trade on, and the cool down period between trades (on a per asset basis). As currently constructed
