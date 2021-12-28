@@ -1,5 +1,5 @@
 /*
-    Copyright 2020 Set Labs Inc.
+    Copyright 2021 IndexTech Ltd.
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ import { AddressArrayUtils } from "../lib/AddressArrayUtils.sol";
 
 /**
  * @title SetToken
- * @author Set Protocol
+ * @author IndexTech Ltd.
  *
  * ERC20 Token contract that allows privileged modules to make modifications to its positions and invoke function calls
  * from the SetToken. 

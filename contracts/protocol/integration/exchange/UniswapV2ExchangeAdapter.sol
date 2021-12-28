@@ -1,5 +1,5 @@
 /*
-    Copyright 2020 Yam Finance
+    Copyright 2021 IndexTech Ltd.
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ pragma experimental "ABIEncoderV2";
 
 /**
  * @title UniswapV2TradeAdapter
- * @author Yam Finance
+ * @author IndexTech Ltd.
  *
  * Exchange adapter for Uniswap V2 Router02 that encodes trade data
  */

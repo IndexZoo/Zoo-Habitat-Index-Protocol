@@ -11,6 +11,9 @@ import "@typechain/hardhat";
 import "solidity-coverage";
 import "./tasks";
 
+
+const UNISWAPROUTER_ADDRESS = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";  // mainnet, rinkbey, kovan
+
 const forkingConfig = {
   url: `https://eth-mainnet.alchemyapi.io/v2/${process.env.ALCHEMY_TOKEN}`,
   blockNumber: 12198000,
@@ -43,16 +46,31 @@ const config: HardhatUserConfig = {
       blockGasLimit: 12000000,
     },
     kovan: {
-      url: "https://kovan.infura.io/v3/" + process.env.INFURA_TOKEN,
+      url: "https://eth-kovan.alchemyapi.io/v2/" + process.env.KOVAN_ALCHEMY_TOKEN,
+      gas: 12000000,
       // @ts-ignore
-      accounts: [`0x${process.env.DEPLOY_PRIVATE_KEY}`],
+      accounts: [`0x${process.env.TEST_PRIVATE_KEY}`],
+      // @ts-ignore
+      uniswapRouterAddress: UNISWAPROUTER_ADDRESS
     },
     rinkeby: {
       url: "https://eth-rinkeby.alchemyapi.io/v2/" + process.env.ALCHEMY_TOKEN,
       gas: 12000000,
       // url: "https://rinkeby.infura.io/v3/" + process.env.INFURA_TOKEN,
       // @ts-ignore
-      accounts: [`0x${process.env.DEPLOY_PRIVATE_KEY}`],
+      accounts: [`0x${process.env.TEST_PRIVATE_KEY}`],
+      // @ts-ignore
+      uniswapRouterAddress: UNISWAPROUTER_ADDRESS,
+      weth: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984"
+    },
+    polygon: {
+      url: "https://polygon-mainnet.g.alchemy.com/v2/" + process.env.POLYGON_ALCHEMY_TOKEN,
+      gas: 12000000,
+      // @ts-ignore
+      accounts: [`0x${process.env.PRODUCTION_LOWFEE_DEPLOY_PRIVATE_KEY}`],
+      // @ts-ignore
+      uniswapRouterAddress: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",  // Sushiswap 
+      weth: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" 
     },
      // To update coverage network configuration got o .solcover.js and update param in providerOptions field
     coverage: {

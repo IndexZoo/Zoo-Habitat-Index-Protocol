@@ -1,5 +1,5 @@
 /*
-    Copyright 2020 Set Labs Inc.
+    Copyright 2021 IndexTech Ltd.
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
     You may obtain a copy of the License at
@@ -30,7 +30,7 @@ import { PreciseUnitMath } from "../../lib/PreciseUnitMath.sol";
 
 /**
  * @title BasicIssuanceModule
- * @author Set Protocol
+ * @author IndexTech Ltd.
  *
  * Module that enables issuance and redemption functionality on a SetToken. This is a module that is
  * required to bring the totalSupply of a Set above 0.

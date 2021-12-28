@@ -1,5 +1,5 @@
 /*
-    Copyright 2020 Set Labs Inc.
+    Copyright 2021 IndexTech Ltd.
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import { AddressArrayUtils } from "../lib/AddressArrayUtils.sol";
 
 /**
  * @title Controller
- * @author Set Protocol
+ * @author IndexTech Ltd.
  *
  * Contract that houses state for approvals and system contracts such as added Sets,
  * modules, factories, resources (like price oracles), and protocol fee configurations.
