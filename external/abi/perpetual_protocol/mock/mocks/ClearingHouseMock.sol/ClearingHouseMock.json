@@ -1,0 +1,312 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "ClearingHouseMock",
+  "sourceName": "src/mock/mocks/ClearingHouseMock.sol",
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "TestEventForPayFunding",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_addedMargin",
+          "type": "tuple"
+        }
+      ],
+      "name": "addMargin",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_quoteAssetAmountLimit",
+          "type": "tuple"
+        }
+      ],
+      "name": "closePosition",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "_trader",
+          "type": "address"
+        }
+      ],
+      "name": "getMarginRatio",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "int256",
+              "name": "d",
+              "type": "int256"
+            }
+          ],
+          "internalType": "struct SignedDecimal.signedDecimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "_trader",
+          "type": "address"
+        }
+      ],
+      "name": "getPosition",
+      "outputs": [
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "int256",
+                  "name": "d",
+                  "type": "int256"
+                }
+              ],
+              "internalType": "struct SignedDecimal.signedDecimal",
+              "name": "size",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "uint256",
+                  "name": "d",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct Decimal.decimal",
+              "name": "margin",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "uint256",
+                  "name": "d",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct Decimal.decimal",
+              "name": "openNotional",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "int256",
+                  "name": "d",
+                  "type": "int256"
+                }
+              ],
+              "internalType": "struct SignedDecimal.signedDecimal",
+              "name": "lastUpdatedCumulativePremiumFraction",
+              "type": "tuple"
+            },
+            {
+              "internalType": "uint256",
+              "name": "liquidityHistoryIndex",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "blockNumber",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct IClearingHouse.Position",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "_trader",
+          "type": "address"
+        }
+      ],
+      "name": "liquidate",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        },
+        {
+          "internalType": "enum IClearingHouse.Side",
+          "name": "_side",
+          "type": "uint8"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_quoteAssetAmount",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_leverage",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_baseAssetAmountLimit",
+          "type": "tuple"
+        }
+      ],
+      "name": "openPosition",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        }
+      ],
+      "name": "payFunding",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_removedMargin",
+          "type": "tuple"
+        }
+      ],
+      "name": "removeMargin",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IAmm",
+          "name": "_amm",
+          "type": "address"
+        }
+      ],
+      "name": "settlePosition",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x608060405234801561001057600080fd5b506103c2806100206000396000f3fe608060405234801561001057600080fd5b50600436106100935760003560e01c8063893d242d11610066578063893d242d146100e1578063a8c1b0bc14610098578063ac06a96e14610098578063b33dc190146100f4578063ea0a45f91461011d57610093565b806330e2ae651461009857806336405257146100ad5780633e09fa10146100c057806386b9d81f146100d3575b600080fd5b6100ab6100a63660046102dc565b61013d565b005b6100ab6100bb366004610213565b610141565b6100ab6100ce366004610213565b610144565b6100ab6100a6366004610236565b6100ab6100ef36600461026e565b61017e565b610107610102366004610236565b610185565b6040516101149190610325565b60405180910390f35b61013061012b366004610236565b610193565b604051610114919061036d565b5050565b50565b7f53006004e00998befb5352e66e31136b83d1e31da1f86e9decd060e510791021816040516101739190610311565b60405180910390a150565b5050505050565b61018d61019b565b92915050565b61018d6101e9565b6040518060c001604052806101ae6101e9565b81526020016101bb6101e9565b81526020016101c86101e9565b81526020016101d56101e9565b815260200160008152602001600081525090565b6040518060200160405280600081525090565b60006020828403121561020d578081fd5b50919050565b600060208284031215610224578081fd5b813561022f81610377565b9392505050565b60008060408385031215610248578081fd5b823561025381610377565b9150602083013561026381610377565b809150509250929050565b600080600080600060a08688031215610285578081fd5b853561029081610377565b94506020860135600281106102a3578182fd5b93506102b287604088016101fc565b92506102c187606088016101fc565b91506102d087608088016101fc565b90509295509295909350565b600080604083850312156102ee578182fd5b82356102f981610377565b915061030884602085016101fc565b90509250929050565b6001600160a01b0391909116815260200190565b600060c08201905082515182526020830151516020830152604083015151604083015260608301515160608301526080830151608083015260a083015160a083015292915050565b9051815260200190565b6001600160a01b038116811461014157600080fdfea2646970667358221220921e6660c3bc32a5d28d9b05d93b85dcbb41dfcb78d3c56ea113374db1e07f6564736f6c63430006090033",
+  "deployedBytecode": "0x608060405234801561001057600080fd5b50600436106100935760003560e01c8063893d242d11610066578063893d242d146100e1578063a8c1b0bc14610098578063ac06a96e14610098578063b33dc190146100f4578063ea0a45f91461011d57610093565b806330e2ae651461009857806336405257146100ad5780633e09fa10146100c057806386b9d81f146100d3575b600080fd5b6100ab6100a63660046102dc565b61013d565b005b6100ab6100bb366004610213565b610141565b6100ab6100ce366004610213565b610144565b6100ab6100a6366004610236565b6100ab6100ef36600461026e565b61017e565b610107610102366004610236565b610185565b6040516101149190610325565b60405180910390f35b61013061012b366004610236565b610193565b604051610114919061036d565b5050565b50565b7f53006004e00998befb5352e66e31136b83d1e31da1f86e9decd060e510791021816040516101739190610311565b60405180910390a150565b5050505050565b61018d61019b565b92915050565b61018d6101e9565b6040518060c001604052806101ae6101e9565b81526020016101bb6101e9565b81526020016101c86101e9565b81526020016101d56101e9565b815260200160008152602001600081525090565b6040518060200160405280600081525090565b60006020828403121561020d578081fd5b50919050565b600060208284031215610224578081fd5b813561022f81610377565b9392505050565b60008060408385031215610248578081fd5b823561025381610377565b9150602083013561026381610377565b809150509250929050565b600080600080600060a08688031215610285578081fd5b853561029081610377565b94506020860135600281106102a3578182fd5b93506102b287604088016101fc565b92506102c187606088016101fc565b91506102d087608088016101fc565b90509295509295909350565b600080604083850312156102ee578182fd5b82356102f981610377565b915061030884602085016101fc565b90509250929050565b6001600160a01b0391909116815260200190565b600060c08201905082515182526020830151516020830152604083015151604083015260608301515160608301526080830151608083015260a083015160a083015292915050565b9051815260200190565b6001600160a01b038116811461014157600080fdfea2646970667358221220921e6660c3bc32a5d28d9b05d93b85dcbb41dfcb78d3c56ea113374db1e07f6564736f6c63430006090033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

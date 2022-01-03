@@ -92,7 +92,7 @@ const config: HardhatUserConfig = {
   externalGasMods: [
   ],
   gasReporter: {
-    enabled: true
+    enabled: false 
   }
 };
 

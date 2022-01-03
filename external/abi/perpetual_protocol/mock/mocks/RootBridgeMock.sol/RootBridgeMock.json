@@ -1,0 +1,96 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "RootBridgeMock",
+  "sourceName": "src/mock/mocks/RootBridgeMock.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "name": "messageId",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_num",
+          "type": "uint256"
+        }
+      ],
+      "name": "mockSetMessageId",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "price",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_priceFeedAddrOnL2",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "_priceFeedKey",
+          "type": "bytes32"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_price",
+          "type": "tuple"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_timestamp",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_roundId",
+          "type": "uint256"
+        }
+      ],
+      "name": "updatePriceFeed",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x608060405234801561001057600080fd5b50610177806100206000396000f3fe608060405234801561001057600080fd5b506004361061004c5760003560e01c80635f4607f414610051578063669f618b1461007a57806398ddfc4014610082578063a035b1fe14610097575b600080fd5b61006461005f3660046100be565b61009f565b6040516100719190610138565b60405180910390f35b6100646100ad565b610095610090366004610120565b6100b3565b005b6100646100b8565b505035603455505060335490565b60335481565b603355565b60345481565b600080600080600085870360a08112156100d6578182fd5b86356001600160a01b03811681146100ec578283fd5b95506020878101359550603f1982011215610105578182fd5b50939692955050506040830192606081013592506080013590565b600060208284031215610131578081fd5b5035919050565b9081526020019056fea2646970667358221220b085edffde5ad83fd1e153dc9158bd4928377bc34468fb520d71ee115035334564736f6c63430006090033",
+  "deployedBytecode": "0x608060405234801561001057600080fd5b506004361061004c5760003560e01c80635f4607f414610051578063669f618b1461007a57806398ddfc4014610082578063a035b1fe14610097575b600080fd5b61006461005f3660046100be565b61009f565b6040516100719190610138565b60405180910390f35b6100646100ad565b610095610090366004610120565b6100b3565b005b6100646100b8565b505035603455505060335490565b60335481565b603355565b60345481565b600080600080600085870360a08112156100d6578182fd5b86356001600160a01b03811681146100ec578283fd5b95506020878101359550603f1982011215610105578182fd5b50939692955050506040830192606081013592506080013590565b600060208284031215610131578081fd5b5035919050565b9081526020019056fea2646970667358221220b085edffde5ad83fd1e153dc9158bd4928377bc34468fb520d71ee115035334564736f6c63430006090033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

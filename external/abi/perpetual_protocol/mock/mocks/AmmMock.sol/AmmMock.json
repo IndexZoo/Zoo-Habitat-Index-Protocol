@@ -1,0 +1,462 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "AmmMock",
+  "sourceName": "src/mock/mocks/AmmMock.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "enum IAmm.Dir",
+          "name": "dir",
+          "type": "uint8"
+        }
+      ],
+      "name": "Dir",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "baseAssetReserve",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "d",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "fundingRate",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "int256",
+              "name": "d",
+              "type": "int256"
+            }
+          ],
+          "internalType": "struct SignedDecimal.signedDecimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "enum IAmm.Dir",
+          "name": "",
+          "type": "uint8"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "name": "getInputPrice",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "enum IAmm.Dir",
+          "name": "",
+          "type": "uint8"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "name": "getOutputPrice",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "enum IAmm.Dir",
+          "name": "",
+          "type": "uint8"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "name": "getOutputTwap",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getReserve",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_baseAssetReserve",
+          "type": "tuple"
+        }
+      ],
+      "name": "mockSetBaseAssetReserve",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "int256",
+              "name": "d",
+              "type": "int256"
+            }
+          ],
+          "internalType": "struct SignedDecimal.signedDecimal",
+          "name": "_fr",
+          "type": "tuple"
+        }
+      ],
+      "name": "mockSetFundingRate",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_inputPrice",
+          "type": "tuple"
+        }
+      ],
+      "name": "mockSetInputPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_outputPrice",
+          "type": "tuple"
+        }
+      ],
+      "name": "mockSetOutputPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_outputTwap",
+          "type": "tuple"
+        }
+      ],
+      "name": "mockSetOutputTwap",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "contract IERC20",
+          "name": "_quoteAsset",
+          "type": "address"
+        }
+      ],
+      "name": "mockSetQuoteAsset",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "_quoteAssetReserve",
+          "type": "tuple"
+        }
+      ],
+      "name": "mockSetQuoteAssetReserve",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "quoteAsset",
+      "outputs": [
+        {
+          "internalType": "contract IERC20",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "quoteAssetReserve",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "d",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "settleFunding",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "enum IAmm.Dir",
+          "name": "",
+          "type": "uint8"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "name": "swapInput",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "enum IAmm.Dir",
+          "name": "",
+          "type": "uint8"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "name": "swapOutput",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "d",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct Decimal.decimal",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x608060405234801561001057600080fd5b5061051c806100206000396000f3fe608060405234801561001057600080fd5b50600436106101165760003560e01c80639ffca62f116100a2578063e1f1027f11610071578063e1f1027f14610211578063e4bc2eb914610224578063ed83d79c1461022c578063fa9d127714610234578063fdf262b71461024757610116565b80639ffca62f146101d6578063c9566fcc146101e9578063d5c6cf16146101fe578063da0c5927146101fe57610116565b8063662d588b116100e9578063662d588b146101775780636fa42ede1461018a578063803da60d1461019d57806391fb46fe146101b05780639b133e8a146101c357610116565b806330007f411461011b57806341d3c84c1461013057806343743e071461014e57806359bf5d3914610161575b600080fd5b61012e610129366004610463565b61025c565b005b610138610262565b604051610145919061049c565b60405180910390f35b61012e61015c3660046103b4565b61027e565b6101696102a0565b6040516101459291906104a6565b61012e610185366004610463565b6102d2565b6101386101983660046103e2565b6102d8565b61012e6101ab366004610463565b6102f7565b61012e6101be366004610463565b6102fd565b61012e6101d1366004610463565b610303565b6101386101e436600461041a565b610309565b6101f1610329565b60405161014591906104b6565b61013861020c3660046103e2565b61032f565b61013861021f3660046103e2565b61034e565b6101f161036d565b61012e610373565b61012e610242366004610463565b610375565b61024f61037b565b6040516101459190610488565b51600355565b61026a61038a565b506040805160208101909152600654815290565b600080546001600160a01b0319166001600160a01b0392909216919091179055565b6102a861038a565b6102b061038a565b5050604080516020808201835260015482528251908101909252600254825291565b51600155565b6102e061038a565b506040805160208101909152600354815292915050565b51600455565b51600255565b51600655565b61031161038a565b50604080516020810190915260055481529392505050565b60025481565b61033761038a565b506040805160208101909152600454815292915050565b61035661038a565b506040805160208101909152600554815292915050565b60015481565b565b51600555565b6000546001600160a01b031681565b6040518060200160405280600081525090565b6000602082840312156103ae578081fd5b50919050565b6000602082840312156103c5578081fd5b81356001600160a01b03811681146103db578182fd5b9392505050565b600080604083850312156103f4578081fd5b823560028110610402578182fd5b9150610411846020850161039d565b90509250929050565b60008060006060848603121561042e578081fd5b83356002811061043c578182fd5b925061044b856020860161039d565b915061045a856040860161039d565b90509250925092565b600060208284031215610474578081fd5b61047e60206104bf565b9135825250919050565b6001600160a01b0391909116815260200190565b9051815260200190565b9151825251602082015260400190565b90815260200190565b60405181810167ffffffffffffffff811182821017156104de57600080fd5b60405291905056fea26469706673582212207f2ec3a5689e3db1e2c994cb0b76529cb06d4f3b954ebb67d702aae9c9939e7664736f6c63430006090033",
+  "deployedBytecode": "0x608060405234801561001057600080fd5b50600436106101165760003560e01c80639ffca62f116100a2578063e1f1027f11610071578063e1f1027f14610211578063e4bc2eb914610224578063ed83d79c1461022c578063fa9d127714610234578063fdf262b71461024757610116565b80639ffca62f146101d6578063c9566fcc146101e9578063d5c6cf16146101fe578063da0c5927146101fe57610116565b8063662d588b116100e9578063662d588b146101775780636fa42ede1461018a578063803da60d1461019d57806391fb46fe146101b05780639b133e8a146101c357610116565b806330007f411461011b57806341d3c84c1461013057806343743e071461014e57806359bf5d3914610161575b600080fd5b61012e610129366004610463565b61025c565b005b610138610262565b604051610145919061049c565b60405180910390f35b61012e61015c3660046103b4565b61027e565b6101696102a0565b6040516101459291906104a6565b61012e610185366004610463565b6102d2565b6101386101983660046103e2565b6102d8565b61012e6101ab366004610463565b6102f7565b61012e6101be366004610463565b6102fd565b61012e6101d1366004610463565b610303565b6101386101e436600461041a565b610309565b6101f1610329565b60405161014591906104b6565b61013861020c3660046103e2565b61032f565b61013861021f3660046103e2565b61034e565b6101f161036d565b61012e610373565b61012e610242366004610463565b610375565b61024f61037b565b6040516101459190610488565b51600355565b61026a61038a565b506040805160208101909152600654815290565b600080546001600160a01b0319166001600160a01b0392909216919091179055565b6102a861038a565b6102b061038a565b5050604080516020808201835260015482528251908101909252600254825291565b51600155565b6102e061038a565b506040805160208101909152600354815292915050565b51600455565b51600255565b51600655565b61031161038a565b50604080516020810190915260055481529392505050565b60025481565b61033761038a565b506040805160208101909152600454815292915050565b61035661038a565b506040805160208101909152600554815292915050565b60015481565b565b51600555565b6000546001600160a01b031681565b6040518060200160405280600081525090565b6000602082840312156103ae578081fd5b50919050565b6000602082840312156103c5578081fd5b81356001600160a01b03811681146103db578182fd5b9392505050565b600080604083850312156103f4578081fd5b823560028110610402578182fd5b9150610411846020850161039d565b90509250929050565b60008060006060848603121561042e578081fd5b83356002811061043c578182fd5b925061044b856020860161039d565b915061045a856040860161039d565b90509250925092565b600060208284031215610474578081fd5b61047e60206104bf565b9135825250919050565b6001600160a01b0391909116815260200190565b9051815260200190565b9151825251602082015260400190565b90815260200190565b60405181810167ffffffffffffffff811182821017156104de57600080fd5b60405291905056fea26469706673582212207f2ec3a5689e3db1e2c994cb0b76529cb06d4f3b954ebb67d702aae9c9939e7664736f6c63430006090033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

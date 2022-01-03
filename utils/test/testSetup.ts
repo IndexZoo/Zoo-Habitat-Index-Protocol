@@ -33,6 +33,7 @@ import DEPLOYMENTS from '../../scripts/deployments';
 import { ERC20 } from '@typechain/ERC20';
 import {abi as ERC20ABI} from '@openzeppelin/contracts/build/contracts/ERC20.json';
 import { UniswapV2Router02 } from '@typechain/UniswapV2Router02';
+import { PerpetualFixture } from '@utils/fixtures/perpetualFixture';
 
 
 const INTEGRATION_REGISTRY_RESOURCE_ID = 0;
@@ -88,6 +89,7 @@ class TestSetup {
     public accounts= <Accounts> {} ;
     public factories: Factories; 
     public contracts: Contracts; 
+    public perpetualFixture: PerpetualFixture;
     public tokensets: SetToken[] = [];
     public tokens: ERC20s = <ERC20s>{};
     public mockTokens: MockERC20s = <MockERC20s>{};
@@ -162,6 +164,8 @@ class TestSetup {
     }
    
    public async initialize(): Promise<void> {
+      this.perpetualFixture = new PerpetualFixture();
+      await this.perpetualFixture.initialize();
       this.forked = process.env.FORKED=== "true";
        this.accounts ;
        [ 

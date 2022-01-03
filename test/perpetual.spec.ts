@@ -11,6 +11,8 @@ import { RewardsDistribution } from "@typechain/RewardsDistribution";
 import { Account } from "@utils/test/types";
 import { SetToken } from "@typechain/SetToken";
 import { bigNumberCloseTo } from "@utils/test/helpers";
+import { PerpetualFixture } from "@utils/fixtures/perpetualFixture";
+import { BigNumber } from "ethers";
 
 // TODO: write a fixture for perpetual
 // TODO: test the fixture 
@@ -20,7 +22,7 @@ import { bigNumberCloseTo } from "@utils/test/helpers";
 const expect = getWaffleExpect();
 const EXCHANGE_ID = {NONE: 0, UNISWAP: 1, SUSHI: 2, BALANCER: 3, LAST: 4};
 
-describe("Rebalancer  ... ", () => {
+describe("Perpetual Contracts  ... ", () => {
     let setup: TestSetup;
     let user: Account;
     let tokenset: SetToken;
@@ -29,10 +31,10 @@ describe("Rebalancer  ... ", () => {
         await setup.initialize();
         user = setup.accounts.user;
         tokenset = setup.tokensets[0];
-
     });
 
-    it("Ensure rebalancer is configured properly with other pieces of set-protocol", async () => {
+    it("Testing Perpetual Fixture ... ", async () => {
+      expect (await setup.perpetualFixture.contracts.metaTxGateway.getNonce(user.address)).to.eq(ether(0));
 
     });
 });
