@@ -67,6 +67,11 @@ import { AmmReader__factory } from '@typechain/factories/AmmReader__factory';
 import { L2PriceFeedMock } from '@typechain/L2PriceFeedMock';
 import { PerpProtoV2Minter } from '@typechain/PerpProtoV2Minter';
 import { StandardTokenMock__factory } from '@typechain/factories/StandardTokenMock__factory';
+import { MultiTokenMediatorMock } from '@typechain/MultiTokenMediatorMock';
+import { MultiTokenMediatorMock__factory } from '@typechain/factories/MultiTokenMediatorMock__factory';
+import { ClientBridge__factory } from '@typechain/factories/ClientBridge__factory';
+import { ClientBridge } from '@typechain/ClientBridge';
+import { Amm } from '@typechain/Amm';
 
 
 const INTEGRATION_REGISTRY_RESOURCE_ID = 0;
@@ -93,13 +98,15 @@ interface Factories {
     clearingHouseViewer: ClearingHouseViewer__factory;
     stakingReserve: StakingReserveFake__factory;
     ambBridgeMock: AMBBridgeMock__factory;
+    multiTokenMediatorMock: MultiTokenMediatorMock__factory;
+    clientBridge: ClientBridge__factory;
     tollPool: TollPool__factory;
-    rewardDistribution: RewardsDistributionFake__factory;
+    rewardsDistribution: RewardsDistributionFake__factory;
     amm: AmmFake__factory;
     ammReader: AmmReader__factory;
 }
 
-interface Contracts {
+export interface Contracts {
     metaTxGateway: MetaTxGateway;
     quoteCoin: StandardTokenMock;
     priceFeed: L2PriceFeedMock;
@@ -113,8 +120,10 @@ interface Contracts {
     clearingHouseViewer: ClearingHouseViewer;
     stakingReserve: StakingReserveFake;
     ambBridgeMock: AMBBridgeMock;
+    multiTokenMediatorMock: MultiTokenMediatorMock;
+    clientBridge: ClientBridge;
     tollPool: TollPool;
-    rewardDistribution: RewardsDistributionFake;
+    rewardsDistribution: RewardsDistributionFake;
     amm: AmmFake;
     ammReader: AmmReader;
 }
@@ -197,8 +206,10 @@ class PerpetualFixture {
         this.factories.clearingHouseViewer = await ethers.getContractFactory("ClearingHouseViewer");
         this.factories.stakingReserve = <StakingReserveFake__factory> await ethers.getContractFactory("StakingReserveFake");
         this.factories.ambBridgeMock = <AMBBridgeMock__factory>  (await ethers.getContractFactory("AMBBridgeMock")) ;
+        this.factories.multiTokenMediatorMock = await ethers.getContractFactory("MultiTokenMediatorMock");
+        this.factories.clientBridge = await ethers.getContractFactory("ClientBridge");
         this.factories.tollPool = await ethers.getContractFactory("TollPool") as TollPool__factory;
-        this.factories.rewardDistribution = await ethers.getContractFactory("RewardsDistributionFake");
+        this.factories.rewardsDistribution = await ethers.getContractFactory("RewardsDistributionFake");
         this.factories.amm = await ethers.getContractFactory("AmmFake") as AmmFake__factory;
         this.factories.ammReader = await ethers.getContractFactory("AmmReader");
 
@@ -218,6 +229,24 @@ class PerpetualFixture {
           this.contracts.clearingHouse.address
         );
         this.contracts.stakingReserve = await this.factories.stakingReserve.deploy();
+        this.contracts.ambBridgeMock = await this.factories.ambBridgeMock.deploy();
+        this.contracts.multiTokenMediatorMock = await this.factories.multiTokenMediatorMock.deploy();
+        this.contracts.clientBridge = await this.factories.clientBridge.deploy();
+        this.contracts.tollPool = await this.factories.tollPool.deploy();
+        this.contracts.rewardsDistribution = await this.factories.rewardsDistribution.deploy();
+        this.contracts.amm = await this.factories.amm.deploy(
+          ether(1000),  // uint quoteAssetReserve
+          ether(100),   // uint baseAssetReserve
+          ether(0.9),   // uint tradeLimitRatio
+          BigNumber.from(86400),   // uint fundingPeriod
+          this.contracts.priceFeed.address,   // address priceFeed
+          ethers.utils.formatBytes32String("ETH"), // bytes32 priceFeedKey
+          this.contracts.quoteCoin.address,  // address quoteAsset
+          BigNumber.from(0),   // uint fluctuation
+          BigNumber.from(0),  // uint tollRatio
+          BigNumber.from(0)   // uint spreadRatio
+        );
+        this.contracts.ammReader = await this.factories.ammReader.deploy();
 
         
         await this.contracts.metaTxGateway.initialize("Perp", "1", 1234);  // name, version, chainId
@@ -246,8 +275,36 @@ class PerpetualFixture {
           this.contracts.clearingHouse.address,
           BigNumber.from(0)
         );
+        await this.contracts.clientBridge.initialize(
+          this.contracts.ambBridgeMock.address,
+          this.contracts.multiTokenMediatorMock.address,
+          this.contracts.metaTxGateway.address
+        );
+        this.contracts.tollPool.initialize(
+          this.contracts.clearingHouse.address,
+          this.contracts.clientBridge.address
+        );
+        this.contracts.clearingHouse.setTollPool(this.contracts.tollPool.address);
+        this.contracts.rewardsDistribution.initialize(
+          this.contracts.minter.address,
+          this.contracts.stakingReserve.address
+        );
 
+        await this.contracts.amm.setGlobalShutdown(this.contracts.insuranceFund.address);
+        await this.contracts.amm.setCounterParty(this.contracts.clearingHouse.address);
+        await this.contracts.insuranceFund.addAmm(this.contracts.amm.address);
+        await this.contracts.stakingReserve.setRewardsDistribution(this.contracts.rewardsDistribution.address);
+        await this.contracts.insuranceFund.setBeneficiary(this.contracts.clearingHouse.address);
+        await this.contracts.insuranceFund.setInflationMonitor(this.contracts.inflationMonitor.address);
+        await this.contracts.pToken.addMinter(this.contracts.minter.address);
+        await this.contracts.minter.setSupplySchedule(this.contracts.supplySchedule.address);
+        await this.contracts.minter.setRewardsDistribution(this.contracts.rewardsDistribution.address);
+        await this.contracts.minter.setInflationMonitor(this.contracts.inflationMonitor.address);
+        await this.contracts.minter.setInsuranceFund(this.contracts.insuranceFund.address);
+        await this.contracts.tollPool.addFeeToken(this.contracts.quoteCoin.address);
 
+        await this.contracts.supplySchedule.startSchedule();
+        await this.contracts.amm.setOpen(true);
         // TODO: fill fixture
        // ----------------------------------------
     }

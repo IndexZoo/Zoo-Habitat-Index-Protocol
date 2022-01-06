@@ -38,6 +38,7 @@ const config: HardhatUserConfig = {
     hardhat: {
       forking: (process.env.FORK) ? forkingConfig : undefined,
       accounts: getHardhatPrivateKeys(),
+      allowUnlimitedContractSize: true
     },
     localhost: {
       url: "http://127.0.0.1:8545",
