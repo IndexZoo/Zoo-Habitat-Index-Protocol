@@ -30,17 +30,6 @@ const recursiveRead =  (path: string, destination_path: string) => {
    }
 };
 
-// Override compile task - add abi perpetual files to external artifacts
-task("compile", async  (_, _c, runSuper)  => {
-  await runSuper();
-  
-  const perpetual_source_path = `${process.cwd()}/external/abi/perpetual_protocol`;
-  const destination_path = `${process.cwd()}/artifacts/external/abi`;
-  if(!fs.existsSync(`${destination_path}`)) {
-    fs.mkdirSync(destination_path);
-  }
-  recursiveRead(perpetual_source_path, destination_path);
-});
 
 // Injects network block limit (minus 1 million) in the abi so
 // ethers uses it instead of running gas estimation.
