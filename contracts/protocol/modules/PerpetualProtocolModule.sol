@@ -37,7 +37,6 @@ import { Position } from "../lib/Position.sol";
 import { PreciseUnitMath } from "../../lib/PreciseUnitMath.sol";
 import { Uint256ArrayUtils } from "../../lib/Uint256ArrayUtils.sol";
 
-// TODO: Next adapter for removeMargin
 
 /**
  * @title PerpetualProtocolModule
@@ -73,6 +72,11 @@ contract PerpetualProtocolModule is ModuleBase, ReentrancyGuard {
         SELL
     }
 
+    enum MarginSide {
+        ADD,
+        SUB
+    }
+
     // Enum of exchange Ids
     enum ExchangeId {
         None,
@@ -102,6 +106,7 @@ contract PerpetualProtocolModule is ModuleBase, ReentrancyGuard {
     string private constant OPEN_POSITION = "openPosition(address,uint8,(uint256),(uint256),(uint256))";
     string private constant CLOSE_POSITION = "closePosition(address,(uint256))";
     string private constant ADD_MARGIN = "addMargin(address,(uint256))";
+    string private constant REMOVE_MARGIN = "removeMargin(address,(uint256))";
 
 
 
@@ -166,6 +171,8 @@ contract PerpetualProtocolModule is ModuleBase, ReentrancyGuard {
     external
     onlyManagerAndValidSet(index)
     {
+        // validate pretrade data
+        // TODO: call hooks
         _executeTradePosition(_side, _quoteAssetAmount, _leverage, _baseAssetAmountLimit);
     }
 
@@ -184,7 +191,16 @@ contract PerpetualProtocolModule is ModuleBase, ReentrancyGuard {
     external
     onlyManagerAndValidSet(index)
     {
-        _executeAddMargin(_addedMargin);
+        _executeEditMargin(MarginSide.ADD, _addedMargin);
+    }
+
+    function removeMargin(
+        uint256 _decreasedMargin 
+    ) 
+    external
+    onlyManagerAndValidSet(index)
+    {
+        _executeEditMargin(MarginSide.SUB, _decreasedMargin);
     }
 
     function removeModule() external override {
@@ -244,19 +260,20 @@ contract PerpetualProtocolModule is ModuleBase, ReentrancyGuard {
      * adjust target units in case fees are accrued. Validate that weth is not a part of the new allocation and that all components
      * in current allocation are in _components array.
      *
-     * @param _addedMargin        Margin amount added to position by trader 
+     * @param _amount        Margin amount added to or removed from position by trader 
      */
-    function _executeAddMargin(
-        uint256 _addedMargin
+    function _executeEditMargin(
+        MarginSide _side,
+        uint256 _amount
     )
         internal
         virtual
     {
         
         bytes memory perpAddMarginCalldata
-         =  _getPerpAddMarginCalldata(_addedMargin);
+         =  _getPerpEditMarginCalldata(_side, _amount);
 
-        index.invokeApprove(address(usdc), address(clearingHouse), _addedMargin);
+        index.invokeApprove(address(usdc), address(clearingHouse), _amount);
         index.invoke(address(clearingHouse), 0, perpAddMarginCalldata);
     }
  
@@ -299,19 +316,20 @@ contract PerpetualProtocolModule is ModuleBase, ReentrancyGuard {
         );
     }
 
-    function _getPerpAddMarginCalldata(
-        uint256 _addedMargin
+    function _getPerpEditMarginCalldata(
+        MarginSide _side,
+        uint256 _amount
     )
         internal
         view
-        returns (bytes memory _addMarginCalldata)
+        returns (bytes memory _editMarginCalldata)
     {
-        string memory functionSignature = ADD_MARGIN;
+        string memory functionSignature = _side == MarginSide.ADD?  ADD_MARGIN:REMOVE_MARGIN;
        
-        _addMarginCalldata = abi.encodeWithSignature(
+        _editMarginCalldata = abi.encodeWithSignature(
             functionSignature,
             amm,
-            _addedMargin
+            _amount
         );
     }
 }

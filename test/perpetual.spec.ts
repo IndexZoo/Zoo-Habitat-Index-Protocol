@@ -238,44 +238,133 @@ describe("Perpetual Contracts  ... ", () => {
     });
 
    describe("PerpetualProtocolModule - add/remove margin", () => {
+      let initDeposit = 60;
         beforeEach(async () => {
-            await subjectModule.trade(Side.BUY, ether(60), ether(10), ether(37.5));
-        })
-      it("increase when increase position", async () => {
-        await setup.contracts.perpetualProtocolModule.trade(
-            Side.BUY, 
-            ether(600), 
-            ether(1),
-            ether(0)
-        );
-        
-        expect(await perpContracts.clearingHouse.openInterestNotionalMap(perpContracts.amm.address)).to.eq(ether(600))
-      });
- 
+            await subjectModule.trade(Side.BUY, ether(initDeposit), ether(10), ether(17.5));
+        });
 
       it("add margin", async () => {
-            const tx = () =>  subjectModule.addMargin( ether(80));
+        let addedMargin = 80;
+            const tx = () =>  subjectModule.addMargin( ether(addedMargin));
             await expect(tx())
             .to.emit(perpContracts.clearingHouse, "MarginChanged").withArgs( 
                 tokenset.address,
                 perpContracts.amm.address,
-                ether(80),
+                ether(addedMargin),
                 "0",
             )
             .to.emit(perpContracts.quoteCoin, "Transfer").withArgs( 
                 tokenset.address,
                 perpContracts.clearingHouse.address,
-                ether(80),
+                ether(addedMargin),
             );
             let tokensetPosition = (await perpContracts.clearingHouse.getPosition(perpContracts.amm.address, tokenset.address)).margin.d;
             let  tokensetBalanceWithFundingPayment = (await perpContracts.clearingHouseViewer.getPersonalBalanceWithFundingPayment(perpContracts.quoteCoin.address, tokenset.address)).d;
 
           
-            expect(tokensetPosition).to.eq(ether(140));
+            expect(tokensetPosition).to.eq(ether(initDeposit+addedMargin));
             expect(tokensetBalanceWithFundingPayment).to.eq(
-                ether(140),
+                ether(initDeposit+addedMargin),
             );
       });
-   });
+     it("remove margin", async () => {
+            // remove margin 20
+            let removedMargin = 20;
+            const tx = () => subjectModule.removeMargin(ether(removedMargin));
+            await expect(tx())
+            .to.emit( perpContracts.clearingHouse, "MarginChanged")
+            .withArgs( 
+                tokenset.address,
+                perpContracts.amm.address,
+                ether(-removedMargin),
+                "0",
+            )
+            .to.emit(perpContracts.quoteCoin, "Transfer")
+            .withArgs( 
+                perpContracts.clearingHouse.address,
+                tokenset.address,
+                ether(removedMargin),
+            );
+            let tokensetPosition = (await perpContracts.clearingHouse.getPosition(perpContracts.amm.address, tokenset.address)).margin.d;
+            let  tokensetBalanceWithFundingPayment = (await perpContracts.clearingHouseViewer.getPersonalBalanceWithFundingPayment(perpContracts.quoteCoin.address, tokenset.address)).d;
 
+          
+            expect(tokensetPosition).to.eq(ether(initDeposit - removedMargin));
+            expect(tokensetBalanceWithFundingPayment).to.eq(
+                ether(initDeposit - removedMargin),
+            );
+        });
+        it("remove margin after pay funding", async () => {
+            // given the underlying twap price is 25.5, and current snapShot price is 1600 / 62.5 = 25.6
+            await perpContracts.priceFeed.setTwapPrice(ether(25.5));
+
+            // when the new fundingRate is 10% which means underlyingPrice < snapshotPrice
+            await gotoNextFundingTime();
+            await perpContracts.clearingHouse.payFunding(perpContracts.amm.address);
+            let latestCumulativePremiumFraction = await perpContracts.clearingHouse.getLatestCumulativePremiumFraction(perpContracts.amm.address);
+            expect(latestCumulativePremiumFraction.d).to.eq(ether(0.1));
+
+            // remove margin 20
+            const tx = () => subjectModule.removeMargin( ether(20));
+            await expect(tx())
+            .to.emit(perpContracts.clearingHouse, "MarginChanged")
+            .withArgs(
+                tokenset.address,
+                perpContracts.amm.address,
+                ether(-20),
+                ether(3.75),
+            );
+        });
+        it("Force error, remove margin - not enough position margin", async () => {
+            // margin is 60, try to remove more than 60
+            const removedMargin = 61;
+            const tx = () => subjectModule.removeMargin(ether(removedMargin));
+
+            await expect(tx())
+            .to.be.revertedWith("margin is not enough");
+        });
+        it ("Force error, remove margin - not enough ratio (4%)", async () => {
+            const removedMargin = 36;
+
+            // remove margin 36
+            // remain margin -> 60 - 36 = 24
+            // margin ratio -> 24 / 600 = 4%
+            await expect(
+                subjectModule.removeMargin(ether(removedMargin))
+            ).to.be.revertedWith("Margin ratio not meet criteria");
+        });
+      });
+      describe("PerpetualProtocolModule - add/remove margin", () => {
+        it("get margin ratio", async () => {
+            await subjectModule.trade( Side.BUY, ether(25), ether(10), ether(20));
+
+            const marginRatio = await perpContracts.clearingHouse.getMarginRatio(perpContracts.amm.address, tokenset.address);
+            expect(marginRatio.d).to.eq(ether(0.1));
+        });
+        it.only("get margin ratio - long", async () => {
+
+            // (1000 + x) * (100 + y) = 1000 * 100
+            //
+            // Alice goes long with 25 quote and 10x leverage
+            // open notional: 25 * 10 = 250
+            // (1000 + 250) * (100 - y) = 1000 * 100
+            // y = 20
+            // AMM: 1250, 80
+            await subjectModule.trade(Side.BUY, ether(25), ether(10), ether(20));
+
+            // Bob goes short with 15 quote and 10x leverage
+            // (1250 - 150) * (80 + y) = 1000 * 100
+            // y = 10.9090909091
+            // AMM: 1100, 90.9090909091
+            await subjectModule.trade(Side.SELL, ether(15), ether(10), ether(0));
+
+            // (1100 - x) * (90.9090909091 + 20) = 1000 * 100
+            // position notional / x : 1100 - 901.6393442622 = 198.3606
+            // unrealizedPnl: 198.3606 - 250 (open notional) = -51.6394
+            // margin ratio:  (25 (margin) - 51.6394) / 198.3606 ~= -0.1342978394
+            const marginRatio = await perpContracts.clearingHouse.getMarginRatio(perpContracts.amm.address, tokenset.address);
+            expect(marginRatio.d).to.eq("-134297520661157024");
+        });
+      });
+ 
 });

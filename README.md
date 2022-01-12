@@ -139,10 +139,8 @@ function startRebalance(address[] calldata _newComponents, uint256[] calldata _n
 ```
 - **_newComponents**                    Array of new components to add to allocation
 - **_newComponentsTargetUnits**         Array of target units at end of rebalance for new components, maps to same index of component
-- **_oldComponentsTargetUnits**         Array of target units at end of rebalance for old component, maps to same index of component,
-     *                                               if component being removed set to 0.
+- **_oldComponentsTargetUnits**         Array of target units at end of rebalance for old component, maps to same index of component. Set to 0 if component being removed.
 - **_positionMultiplier**               Position multiplier when target units were calculated, needed in order to adjust target units
-     *                                               if fees accrued
 ### **trade** 
 Only approved addresses can call if `anyoneTrade` is false. Determines trade size and direction and swaps into or out of WETH on exchange specified by manager.
 ```
@@ -256,11 +254,11 @@ function getFee(ISetToken _setToken) external view returns (uint256)
 |-------| :-----|
 | Controller | [0x52B6554bF4F57589172dc7aB08957fb52B1b9Bc6](https://polygonscan.com/address/0x52B6554bF4F57589172dc7aB08957fb52B1b9Bc6) |
 | IntegrationRegistry | [0x172492D142C2749A5dA80a50a360cb2224c55Cda](https://polygonscan.com/address/0x172492D142C2749A5dA80a50a360cb2224c55Cda)  |
-| SetTokenCreator | [0x20c4F9a8086125cbE8490F7493F3B506d4B7043e](https://polygonscan.com/address/0x20c4F9a8086125cbE8490F7493F3B506d4B7043e) |
+| SetTokenCreator | [0x7f08bdc08b32e6b93ef5977db2f0f7f96fd8dbfb](https://polygonscan.com/address/0x20c4F9a8086125cbE8490F7493F3B506d4B7043e) |
 | BasicIssuanceModule | [0x507723DfdD9eE51f06D1E3E74585f80604766875](https://polygonscan.com/address/0x507723DfdD9eE51f06D1E3E74585f80604766875)  |
 | TradeModule | [0x01159F31523bF949Ca5b9bfFb493245810059452](https://polygonscan.com/address/0x01159F31523bF949Ca5b9bfFb493245810059452) |
 | StreamingFeeModule | [0xD4651d83438d6834248A9154b001A86186DC0EaE](https://polygonscan.com/address/0xD4651d83438d6834248A9154b001A86186DC0EaE)  |
-| SingleIndexModule | [0x0cBa25d10b6D2B3bF524dd7490bb3943C0b575dA](https://polygonscan.com/address/0x0cBa25d10b6D2B3bF524dd7490bb3943C0b575dA)  | 
+| SingleIndexModule | [0x6E79A7d5BA1646D187BC8F85ea1df4A0de1D7206](https://polygonscan.com/address/0x0cBa25d10b6D2B3bF524dd7490bb3943C0b575dA)  | 
 | UniswapV2ExchangeAdapter | [0x9fb8E1A9E38b16E9404CBB82a0B9e36531309484](https://polygonscan.com/address/0x9fb8E1A9E38b16E9404CBB82a0B9e36531309484)  | 
 
 # Dev
