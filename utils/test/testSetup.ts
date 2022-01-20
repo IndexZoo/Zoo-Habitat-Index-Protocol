@@ -33,9 +33,6 @@ import DEPLOYMENTS from '../../scripts/deployments';
 import { ERC20 } from '@typechain/ERC20';
 import {abi as ERC20ABI} from '@openzeppelin/contracts/build/contracts/ERC20.json';
 import { UniswapV2Router02 } from '@typechain/UniswapV2Router02';
-import { PerpetualFixture } from '@utils/fixtures/perpetualFixture';
-import { PerpetualProtocolModule } from '@typechain/PerpetualProtocolModule';
-import { PerpetualProtocolModule__factory } from '@typechain/factories/PerpetualProtocolModule__factory';
 
 
 const INTEGRATION_REGISTRY_RESOURCE_ID = 0;
@@ -60,7 +57,6 @@ interface Factories {
     UniswapV2ExchangeAdapter: ContractFactory;
     SingleIndexModuleContract: ContractFactory;
     StreamingFeeModule: StreamingFeeModule__factory;
-    PerpetualProtocolModule: PerpetualProtocolModule__factory;
 }
 
 interface Contracts {
@@ -72,7 +68,6 @@ interface Contracts {
     tradeModule: TradeModule;
     singleIndexModule: SingleIndexModule;
     streamingFeeModule: StreamingFeeModule;
-    perpetualProtocolModule: PerpetualProtocolModule;
 }
 
 interface ERC20s {
@@ -93,7 +88,6 @@ class TestSetup {
     public accounts= <Accounts> {} ;
     public factories: Factories; 
     public contracts: Contracts; 
-    public perpetualFixture: PerpetualFixture;
     public tokensets: SetToken[] = [];
     public tokens: ERC20s = <ERC20s>{};
     public mockTokens: MockERC20s = <MockERC20s>{};
@@ -125,7 +119,6 @@ class TestSetup {
         await this.mockTokens.mockDai.connect(account.wallet).approve(module, MAX_UINT_256);
         await this.mockTokens.mockWeth.connect(account.wallet).approve(module, MAX_UINT_256);
         await this.mockTokens.mockGenToken.connect(account.wallet).approve(module, MAX_UINT_256);   
-        await this.perpetualFixture.contracts.quoteCoin.connect(account.wallet).approve(module, MAX_UINT_256);
       }
    }
 
@@ -167,10 +160,35 @@ class TestSetup {
       this.tokens.matic = await ethers.getContractAt(ERC20ABI, DEPLOYMENTS.mainnet.MATIC) as ERC20;
       this.tokens.usdt = await ethers.getContractAt(ERC20ABI, DEPLOYMENTS.mainnet.USDT) as ERC20;
     }
+
+    public async createSetToken(
+      tokens: [string], 
+      weights: [BigNumber], 
+      manager: string, 
+      name: string, 
+      symbol: string): Promise<void> {
+      const setTokenReceipt =  await (await this.contracts.setTokenCreator.create(
+        tokens, 
+        weights, 
+        [
+          this.contracts.basicIssuanceModule.address, 
+          this.contracts.tradeModule.address, 
+          this.contracts.singleIndexModule.address,
+          this.contracts.streamingFeeModule.address 
+        ], 
+        manager,
+        name, 
+        symbol)
+      ).wait();
+      const event = setTokenReceipt.events?.find(p => p.event == "SetTokenCreated");
+      const tokensetAddress = event? event.args? event.args[0]:"":"";
+      let deployedSetToken =  await ethers.getContractAt(SetTokenABI, tokensetAddress);
+        this.tokensets.push(deployedSetToken as SetToken);
+        await this.contracts.basicIssuanceModule.initialize(deployedSetToken.address, ADDRESS_ZERO);
+        await this.contracts.tradeModule.initialize(deployedSetToken.address);
+    }
    
    public async initialize(): Promise<void> {
-      this.perpetualFixture = new PerpetualFixture();
-      await this.perpetualFixture.initialize();
       this.forked = process.env.FORKED=== "true";
        this.accounts ;
        [ 
@@ -192,13 +210,9 @@ class TestSetup {
         let wethAddress = this.forked? DEPLOYMENTS.mainnet.WETH:this.mockTokens.mockWeth.address;
         this.contracts = await deployContracts(
           factories, 
-          this.accounts.owner, 
           this.accounts.feeRecipient, 
           wethAddress, 
-          this.perpetualFixture.contracts.quoteCoin.address,
           this.uniswapRouter.address,
-          this.perpetualFixture.contracts.clearingHouse.address,
-          this.perpetualFixture.contracts.amm.address
         );
 
 
@@ -207,7 +221,6 @@ class TestSetup {
           this.contracts.tradeModule.address, 
           this.contracts.singleIndexModule.address, 
           this.contracts.streamingFeeModule.address,
-          this.contracts.perpetualProtocolModule.address
         ], 
         [this.contracts.integrationRegistry.address], 
         [INTEGRATION_REGISTRY_RESOURCE_ID]);
@@ -263,30 +276,7 @@ class TestSetup {
         await this.contracts.basicIssuanceModule.initialize(this.tokensets[1].address, ADDRESS_ZERO);
         await this.contracts.tradeModule.initialize(this.tokensets[1].address);
         // ----------------------------------------
-        // --- Create a tokenset through factory 
-      const setTokenReceipt3 =  await (await this.contracts.setTokenCreator.create(
-        [
-          this.perpetualFixture.contracts.quoteCoin.address
-        ],
-        [ether(1)],
-        [
-          this.contracts.basicIssuanceModule.address, 
-          this.contracts.tradeModule.address, 
-          this.contracts.singleIndexModule.address,
-          this.contracts.streamingFeeModule.address,
-          this.contracts.perpetualProtocolModule.address
-        ], 
-        this.accounts.owner.address,
-        "indexzoo", "ZOO")).wait();
-      const event3 = setTokenReceipt3.events?.find(p => p.event == "SetTokenCreated");
-      const tokensetAddress3 = event3? event3.args? event3.args[0]:"":"";
-      let deployedSetToken3 =  await ethers.getContractAt(SetTokenABI, tokensetAddress3);
-        this.tokensets.push(deployedSetToken3 as SetToken);
-        await this.contracts.basicIssuanceModule.initialize(deployedSetToken3.address, ADDRESS_ZERO);
-        await this.contracts.tradeModule.initialize(deployedSetToken3.address);
-        await this.contracts.perpetualProtocolModule.initialize(deployedSetToken3.address);
-        // ----------------------------------------
-    }
+   }
 }
 
 export {TestSetup};

@@ -75,13 +75,9 @@ const initUniswapRouter = async(owner: Account, weth: string, dai: string, btc: 
 
 const deployContracts = async (
             factories: any, 
-            owner: Account, 
             feeRecipient: Account, 
             wethAddress: string, 
-            usdcAddress: string, 
             router: string,
-            clearingHouse: string,
-            amm: string
       ) => {
       let controller = await factories.ControllerContract.deploy(feeRecipient.address);
       let integrationRegistry = await factories.IntegrationRegistryContract.deploy(controller.address);
@@ -95,13 +91,6 @@ const deployContracts = async (
             ADDRESS_ZERO,   // Testing only on uniswap
             ADDRESS_ZERO );
       let streamingFeeModule = await factories.StreamingFeeModuleContract.deploy(controller.address);
-      let perpetualProtocolModule = await factories.PerpetualProtocolModuleContract.deploy(
-            controller.address,
-            clearingHouse,
-            amm,
-            usdcAddress 
-      )
-
       return {
             controller,
             integrationRegistry,
@@ -111,7 +100,6 @@ const deployContracts = async (
             tradeModule,
             singleIndexModule,
             streamingFeeModule,
-            perpetualProtocolModule
       }
 }
 
@@ -127,7 +115,6 @@ const loadFactories = async () => {
       let RebalanceModuleContract = await ethers.getContractFactory("RebalanceModule");
       let SingleIndexModuleContract = await ethers.getContractFactory("SingleIndexModule");
       let StreamingFeeModuleContract = await ethers.getContractFactory("StreamingFeeModule");
-      let PerpetualProtocolModuleContract = await ethers.getContractFactory("PerpetualProtocolModule");
 
       return {
         StandardTokenMockContract, 
@@ -141,7 +128,6 @@ const loadFactories = async () => {
         RebalanceModuleContract,
         SingleIndexModuleContract,
         StreamingFeeModuleContract,
-        PerpetualProtocolModuleContract
     }
 }
 
