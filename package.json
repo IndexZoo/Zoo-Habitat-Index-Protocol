@@ -26,7 +26,7 @@
     "lint": "yarn run lint-sol && yarn run lint-ts",
     "lint-sol": "solhint 'contracts/**/*.sol'",
     "lint-ts": "eslint -c .eslintrc.js --ext .ts test utils tasks --fix",
-    "test": "npx hardhat test",
+    "test": "npx hardhat test test/phase2/*",
     "transpile": "tsc",
     "transpile-dist": "tsc -p tsconfig.dist.json",
     "typechain": "npx hardhat typechain"

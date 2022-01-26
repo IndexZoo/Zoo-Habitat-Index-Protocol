@@ -1,5 +1,5 @@
 import "module-alias/register";
-import "./ztypes";
+import "../ztypes";
 import { Account } from "@utils/test/types";
 import { ADDRESS_ZERO, MAX_UINT_256 } from "@utils/constants";
 import {

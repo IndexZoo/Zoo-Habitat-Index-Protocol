@@ -23,7 +23,7 @@ import { WETH9__factory } from "@typechain/factories/WETH9__factory";
 import { L3xIssuanceModule } from "@typechain/L3xIssuanceModule";
 
 const expect = getWaffleExpect();
-const INTEGRATION_REGISTRY_RESOURCE_ID = 0;
+
 const initUniswapRouter = async(owner: Account, weth:  Contract, dai:  StandardTokenMock, btc: StandardTokenMock): Promise<UniswapV2Router02> => {
       let router: UniswapV2Router02;
 
@@ -67,9 +67,6 @@ class Context {
   public subjectModule: L3xIssuanceModule;
   public router: UniswapV2Router02;
 
-  // let StandardTokenMockContract: StandardTokenMock__factory;
-  // let L3xIssuanceModuleContract: L3xIssuanceModule__factory;
-  
   public async initialize() : Promise<void>  {
     [
       this.accounts.owner,
@@ -92,25 +89,12 @@ class Context {
       await this.tokens.weth.connect(this.accounts.bob.wallet).deposit({value: ether(500)});
       await this.tokens.weth.deposit({value: ether(5000)});
       await this.tokens.weth.connect(this.accounts.mockSubjectModule.wallet).deposit({value: ether(500)});
-      // await subjectModule.deposit({value: ether(500)}); // subjectModule has 500 Weth
       await this.tokens.mockDai.transfer(this.accounts.bob.address, ether(200000));
-      // await mockDai.transfer(mockSubjectModule.address, ether(200000));
 
       this.router = await initUniswapRouter(this.accounts.owner, this.tokens.weth, this.tokens.mockDai, this.tokens.mockBtc);      
       await  this.aaveFixture.initialize(this.tokens.weth.address, this.tokens.mockDai.address);
       await this.subjectModule.setLendingPool(this.aaveFixture.lendingPool.address);
       await this.subjectModule.setRouter(this.router.address);
-
-
-    // // Get the Protocol Data Provider
-    // let reserveDaiAddress  = (await aaveFixture.protocolDataProvider.getReserveTokensAddresses(mockDai.address))[1];   
-
-    
-    // // For stable debt tokens
-    // console.log(reserveDaiAddress);
-    // let reserveDai = (await ethers.getContractFactory("AaveV2StableDebtToken")).attach(reserveDaiAddress);
-    // console.log(reserveDai);
-    // await ethers.provider.  approveDelegation(bob.address, ether(8000));
 
     // provide liquidity
         await this.tokens.mockDai.connect(this.accounts.owner.wallet).approve(this.aaveFixture.lendingPool.address, MAX_UINT_256);
@@ -144,7 +128,7 @@ describe("Controller", () => {
     });
     it("SubjectModule deposits weth and borrows against it", async ()=>{
        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-       await ctx.subjectModule.issue(ether(10000), ether(700));
+       await ctx.subjectModule.issue(ether(10000), ether(800));
 
        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(ctx.subjectModule.address));
        let leverage = userData.totalCollateralETH.add(userData.totalDebtETH).mul(1000).div(ether(10));
