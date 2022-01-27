@@ -100,6 +100,8 @@ interface IZooToken is IERC20 {
 
     function editPositionMultiplier(int256 _newMultiplier) external;
 
+    function addDebt(address _account, uint256 _quantity) external;
+    function payDebt(address _account, uint256 _quantity) external;
     function mint(address _account, uint256 _quantity) external;
     function burn(address _account, uint256 _quantity) external;
 

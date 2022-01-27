@@ -330,6 +330,29 @@ contract ZooToken is ERC20 {
     }
 
     /**
+     * PRIVELEGED MODULE FUNCTION. Increases the "account" debt by the "quantity".
+     * Debt is calculated w.r.t. value of quoteToken in case of Bull token
+     * Debt is calculated w.r.t. value of baseToken in case of Bear token
+     */
+    function addDebt(address _account, uint256 _quantity) external onlyModule whenLockedOnlyLocker {
+       _debts[_account] = _debts[_account].add(_quantity) ;
+       _totalDebt = _totalDebt.add(_quantity);
+    }
+
+    /**
+     * PRIVELEGED MODULE FUNCTION. Decreases the "account" debt by the "quantity".
+     * Debt is calculated w.r.t. value of quoteToken
+     * Debt is calculated w.r.t. value of baseToken in case of Bear token
+     */
+    function payDebt(address _account, uint256 _quantity) external onlyModule whenLockedOnlyLocker {
+        // cieling on _quantity
+        uint256  amount = _quantity > _debts[_account]? _debts[_account]:_quantity ;
+        // Math unchecked
+        _debts[_account] = _debts[_account] - amount ;
+        _totalDebt = _totalDebt - amount;
+    }
+
+    /**
      * PRIVELEGED MODULE FUNCTION. Increases the "account" balance by the "quantity".
      */
     function mint(address _account, uint256 _quantity) external onlyModule whenLockedOnlyLocker {
