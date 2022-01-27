@@ -27,10 +27,10 @@ import { IController } from "../../interfaces/IController.sol";
 import { IUniswapV2Router } from "../../interfaces/external/IUniswapV2Router.sol";
 import { ILendingPool } from "../../interfaces/external/aave-v2/ILendingPool.sol";
 import { Invoke } from "../lib/Invoke.sol";
-import { ISetToken } from "../../interfaces/ISetToken.sol";
+import { IZooToken } from "../../interfaces/IZooToken.sol";
 import { IssuanceValidationUtils } from "../lib/IssuanceValidationUtils.sol";
 import { Position } from "../lib/Position.sol";
-import { ModuleBase } from "../lib/ModuleBase.sol";
+import { ModuleBase } from "../lib/ZooModuleBase.sol";
 import "hardhat/console.sol";
 
 /**
@@ -49,7 +49,7 @@ import "hardhat/console.sol";
  */
 
  // Dev Notes
-contract L3xIssuanceModule is  ReentrancyGuard {
+contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
 
     ILendingPool public lender;
     IUniswapV2Router public router;
@@ -67,12 +67,27 @@ contract L3xIssuanceModule is  ReentrancyGuard {
      * @param dai_    Address of DAI, Represents the quoteToken 
      */
     
-    constructor(IERC20 weth_, IERC20 dai_) public  {
+    constructor(IController _controller, IERC20 weth_, IERC20 dai_) public ModuleBase (_controller) {
         weth = weth_;
         dai = dai_;
     }
 
     /* ============ External Functions ============ */
+
+    /**
+     * Initializes this module to the SetToken. Only callable by the SetToken's manager.
+     *
+     * @param _zooToken                 Instance of the SetToken to initialize
+     */
+    function initialize(
+        IZooToken _zooToken
+    )
+        external
+        onlyValidAndPendingSet(_zooToken)
+        onlySetManager(_zooToken, msg.sender)
+    {
+        _zooToken.initializeModule();
+    }
 
     function deposit(
     )
@@ -128,7 +143,7 @@ contract L3xIssuanceModule is  ReentrancyGuard {
         router = router_;
     }
 
-    // function removeModule() external override {}
+    function removeModule() external override {}
 
 
    /**  -------------------------------- Private functions --------------------------------------------------
