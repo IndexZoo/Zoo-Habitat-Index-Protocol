@@ -191,38 +191,24 @@ describe("Controller", () => {
         let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(ctx.subjectModule.address));
         expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
     });
-    it.only("SubjectModule deposits weth and borrows against it", async ()=>{
+    it.only("SubjectModule deposits weth and borrows against it on behalf of zooToken", async ()=>{
+       let wethAmount = 10;
        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-       console.log((await ctx.tokens.weth .balanceOf(zToken.address)).toString());
-       console.log((await ctx.tokens.mockDai.balanceOf(zToken.address)).toString());
-       await ctx.subjectModule.issue(zToken.address, ether(10000), ether(800));
-       console.log((await ctx.tokens.weth .balanceOf(zToken.address)).toString());
-       console.log((await ctx.tokens.mockDai.balanceOf(zToken.address)).toString());
-       // TODO: expect statements
-
+       await ctx.subjectModule.issue(zToken.address, ether(10000), ether(800), ether(1000), 985);
+       
        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-       console.log(userData.totalCollateralETH.toString());
-       let leverage = ether(10).add(userData.totalDebtETH).mul(1000).div(ether(10));
-       console.log(leverage.toString());
-       console.log(userData.currentLiquidationThreshold.toString());
-       console.log(userData.healthFactor.toString());
-       console.log((await zToken.balanceOf(owner.address)).toString());
 
-      //  expect(leverage).to.be.gt(2000);   // leverage ~ 2425 for minimum healthFactor/maximum risk
-      //  expect(userData.currentLiquidationThreshold).to.gt(BigNumber.from(8000));
-      //  expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
+       // leverage represented in thousands (i.e. 2500 leverage ~ 2.5x leverage)
+       let leverage = ether(wethAmount).add(userData.totalDebtETH).mul(1000).div(ether(wethAmount));
+
+       expect(leverage).to.be.gt(2000);   // leverage ~ 2425 for minimum healthFactor/maximum risk
+       expect(userData.currentLiquidationThreshold).to.gt(BigNumber.from(8000));
+       expect(userData.totalCollateralETH).to.be.gt(ether(wethAmount)).to.be.lt(ether(20));
+       expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
+       expect(await zToken.balanceOf(owner.address)).to.be.gt(ether(20));
+
+       // amount weth expected on the second borrow = 10 * 0.8 * 0.8 - fees
+       expect(await ctx.tokens.weth.balanceOf(zToken.address)).to.be.gt(ether(wethAmount/2)).to.be.lt(ether(wethAmount*0.64));
     });
-    // it("SubjectModule deposits weth and borrows against it", async ()=>{
-    //    await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-    //    await ctx.subjectModule.issue(ether(10000), ether(800));
-
-    //    let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(ctx.subjectModule.address));
-    //    let leverage = userData.totalCollateralETH.add(userData.totalDebtETH).mul(1000).div(ether(10));
-
-    //    expect(leverage).to.be.gt(2500);   // leverage = 2865 for minimum healthFactor/maximum risk
-    //    expect(userData.currentLiquidationThreshold).to.gt(BigNumber.from(8000));
-    //    expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
-    // });
-
   });
 });

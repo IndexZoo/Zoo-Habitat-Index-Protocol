@@ -50,10 +50,9 @@ import "hardhat/console.sol";
  */
 
  // Dev Notes
- // TODO: Make calls from  an integration registry
- // TODO: SafeMath
  // TODO: Redeem logic
- // TODO: Streaming fees
+ // TODO: Make calls from  an integration registry
+ // TODO: Streaming fees testing
  // DONE: Mint and set debt on zooToken
  // TODO: Rebalance formula
  // TODO: Liquidation Threshold
@@ -116,33 +115,36 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
      * TODO: Integration Registry should be the provider of the calldata
      * DONE: Leverage token is meant to be the object invoking the function trading calls
      *
-     * @param _quantity         Quantity of quote token input to go long 
-     * @param _amountPerBase    amount of quote allowed to be borrowed per baseToken
+     * @param quantity_         Quantity of quote token input to go long 
+     * @param amountPerBase_    amount of quote allowed to be borrowed per baseToken
      */
     function issue (
-        IZooToken _zooToken,
-        uint256 _quantity,
-        uint256 _amountPerBase
-        // address _to
+        IZooToken zooToken_,
+        uint256 quantity_,
+        uint256 amountPerBase_,
+        uint256 basePriceInQuotes_,
+        uint256 swapFactorx1000_
     )
         external
         nonReentrant
-        onlyValidAndInitializedSet(_zooToken)
+        onlyValidAndInitializedSet(zooToken_)
     {
-        // TODO: For loop
-        dai.transferFrom(msg.sender, address(_zooToken), _quantity);
+        dai.transferFrom(msg.sender, address(zooToken_), quantity_);
         // swap dai for baseToken
-        uint256 price = 1000;  
-        uint256 amountOut1 = _swapQuoteForBase(_zooToken, _quantity, _quantity * 99/100/price);
+        uint256 amountOut = _swapQuoteForBase(zooToken_, quantity_, _multiplyByFactorSwap(quantity_, swapFactorx1000_, basePriceInQuotes_)); 
+        uint256 borrowAmount;
+        uint256 totalAmountOut = amountOut;
+        uint256 totalBorrowAmount;
+        for (uint8 i = 0; i < 2; i++) {
+            borrowAmount = _borrowQuoteForBaseCollateral(zooToken_, amountOut, amountPerBase_);
+            amountOut = _swapQuoteForBase(zooToken_, borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, basePriceInQuotes_));
+            totalAmountOut = totalAmountOut.add(amountOut);
+            totalBorrowAmount = totalBorrowAmount.add(totalBorrowAmount);
+        }
         // Borrow quoteToken from lending Protocol
-        uint256 borrowAmount1 = _borrowQuoteForBaseCollateral(_zooToken, amountOut1, _amountPerBase);
-        uint256 amountOut2 = _swapQuoteForBase(_zooToken, borrowAmount1, borrowAmount1 * 99/100/price);
-        uint256 borrowAmount2 = _borrowQuoteForBaseCollateral(_zooToken, amountOut2, _amountPerBase);
-        uint256 amountOut3 = _swapQuoteForBase(_zooToken, borrowAmount2, borrowAmount2 * 98/100/price);
-        // TODO: mint tokens with amount proportional to the total deposits and baseToken output
-        uint256 totalAmountOut = amountOut1.add(amountOut2).add(amountOut3);
-        _zooToken.addDebt(msg.sender, borrowAmount1.add(borrowAmount2));
-        _zooToken.mint(msg.sender, totalAmountOut);
+       // TODO: mint tokens with amount proportional to the total deposits and baseToken output
+        zooToken_.addDebt(msg.sender, totalBorrowAmount);
+        zooToken_.mint(msg.sender, totalAmountOut);
         require(totalAmountOut != 0, "L3xIssueMod: Leveraging failed");
     }
 
@@ -162,6 +164,17 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
 
    /**  -------------------------------- Private functions --------------------------------------------------
     */
+    function _multiplyByFactorSwap(
+        uint256 amount_,
+        uint256 factorx1000_,
+        uint256 price_
+    )
+    private
+    pure
+    returns (uint256)
+    {
+        return amount_.mul(factorx1000_).div(1000).mul(1 ether).div(price_);
+    }
     function _borrowQuoteForBaseCollateral(
         IZooToken zooToken,
         uint256 depositAmount,
@@ -173,35 +186,53 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         _invokeApprove(zooToken, address(weth), address(lender), depositAmount);
         _invokeDeposit(zooToken, address(weth), depositAmount);
         // approve lender to receive swapped baseToken
-        notionalBorrowAmount = borrowAmountPerBase * depositAmount / (1 ether);
+        notionalBorrowAmount = borrowAmountPerBase.mul(  depositAmount).div (1 ether);
         _invokeBorrow(zooToken, address(dai), notionalBorrowAmount);
         // TODO: ensure borrow took place ?
     }
     function _swapQuoteForBase(
-        IZooToken zooToken,
-        uint256 amountIn, 
-        uint256 minAmountOut
+        IZooToken zooToken_,
+        uint256 amountIn_, 
+        uint256 minAmountOut_
       ) 
       private 
       returns (uint256 amountOut) 
     {
 
-        _invokeApprove(zooToken, address(dai), address(router), amountIn);
-        // dai.approve(address(router),  amountIn);
+        _invokeApprove(zooToken_, address(dai), address(router), amountIn_);
+        amountOut = _invokeSwap(zooToken_, amountIn_, minAmountOut_);
+        require(amountOut != 0, "L3xIssueMod: Leveraging swapping failed");
+        // TODO: ensure swap took place ?
+    }
+
+    /**
+     * Instructs the ZooToken to call swap tokens of the ERC20 token on target Uniswap like dex 
+     *
+     * @param zooToken_        SetToken instance to invoke
+     * @param amountIn_          Exact Amount of token to exchange
+     * @param minAmountOut_          Min Amount of token to receive 
+     */
+    function _invokeSwap(
+        IZooToken zooToken_,
+        uint256 amountIn_,
+        uint256 minAmountOut_
+    )
+    private 
+    returns (uint256 amountOut)
+    {
         address[] memory path = new address[](2);
         path[0] = address(dai); 
         path[1] = address(weth);
         bytes memory callData = abi.encodeWithSignature(
             "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
-            amountIn,
-            minAmountOut,
+            amountIn_,
+            minAmountOut_,
             path,
-            address(zooToken),
+            address(zooToken_),
             block.timestamp     
         );
-        bytes memory data = zooToken.invoke(address(router), 0, callData);
+        bytes memory data = zooToken_.invoke(address(router), 0, callData);
         amountOut = abi.decode(data, (uint256[]))[1];
-        // TODO: ensure swap took place ?
     }
     /**
      * Instructs the SetToken to set approvals of the ERC20 token to a spender.
