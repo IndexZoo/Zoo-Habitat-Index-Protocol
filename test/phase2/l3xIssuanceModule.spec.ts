@@ -119,9 +119,9 @@ class Context {
       this.tokens.mockBtc = await (await ethers.getContractFactory("StandardTokenMock")).deploy(this.accounts.owner.address, bitcoin(1000000), "MockBtc", "MBTC", 8);
       this.tokens.weth = await new WETH9__factory(this.accounts.owner.wallet).deploy();
 
-      await this.tokens.weth.connect(this.accounts.bob.wallet).deposit({value: ether(500)});
+      // await this.tokens.weth.connect(this.accounts.bob.wallet).deposit({value: ether(500)});
       await this.tokens.weth.deposit({value: ether(5000)});
-      await this.tokens.mockDai.transfer(this.accounts.bob.address, ether(200000));
+      // await this.tokens.mockDai.transfer(this.accounts.bob.address, ether(200000));
       
       this.router = await initUniswapRouter(this.accounts.owner, this.tokens.weth, this.tokens.mockDai, this.tokens.mockBtc);      
       await  this.aaveFixture.initialize(this.tokens.weth.address, this.tokens.mockDai.address);
@@ -223,6 +223,85 @@ describe("Controller", () => {
         expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(0));
 
     });
+
+    /**
+     * Purpose of this test is to check borrow allowances with double deposits and partial repays
+     * Bob deposits 10 WETH, then borrows corresponding 8000 DAI
+     * EXPECT DAI balance of Bob increase by borrowed amount
+     * EXPECT debt to be 8000 DAI ~ 8 ETH (calculate via oracle price)
+     * Bob deposits the 8000 DAI after swapping them for 8 ETH
+     * Bob checks available amount to borrow, should be 6.4 ETH
+     * Bob Borrows against that deposited ETH
+     * Bob repays debt second debt 6.4 ETH
+     * Check userData TODO: Look what to expect
+     * EXPECT DAI balance of Bob to be the same as initial DAI balance
+     * EXPECT debt position to be nil
+     */
+    it.only("Verify Interaction with Aave fixture directly - double deposit and repayments", async ()=>{
+        await ctx.tokens.weth.connect(bob.wallet).deposit({value: ether(10)});
+        let daiPriceInEth = await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address);
+        let ethPriceInDai = ether(1).mul(ether(1)).div(daiPriceInEth);
+        await ctx.tokens.weth.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+        await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+        await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.router.address, MAX_UINT_256);
+        let initDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+
+        // Deposit and Borrow FIRST
+        await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(ctx.tokens.weth.address, ether(10), bob.address, ZERO);
+        await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(ctx.tokens.mockDai.address, ether(8000), BigNumber.from(1), ZERO, bob.address);
+        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+        let borrowedDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+        expect(borrowedDaiBalance).to.approx(initDaiBalance.add(ether(8000)));
+        expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(8000));
+        console.log("Borrowed DAI balance after deposit ", borrowedDaiBalance.toString());
+
+        // Swap 
+        console.log((await ctx.tokens.weth.balanceOf(bob.address)).toString());
+        await ctx.router.connect(bob.wallet).swapExactTokensForTokens(
+          ether(8000), 
+          ether(0), 
+          [ctx.tokens.mockDai.address, ctx.tokens.weth.address],
+          bob.address,
+          MAX_UINT_256
+        );
+        let bobWethSwapped = await ctx.tokens.weth.balanceOf(bob.address);
+        await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(
+          ctx.tokens.weth.address, 
+          bobWethSwapped, 
+          bob.address, 
+          ZERO
+        );
+        userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+
+        let avBorrow = userData.availableBorrowsETH.mul(ether(1)).div(
+          await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address)
+        );
+        console.log("amount to Borrow ", avBorrow.toString())
+        console.log("dai balance before second borrow", (await ctx.tokens.mockDai.balanceOf(bob.address)).toString());
+        await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(
+          ctx.tokens.mockDai.address, 
+          avBorrow.mul(999).div(1000),  // borrow 99.9% of available (magic number)
+          BigNumber.from(1), 
+          ZERO, 
+          bob.address
+        );
+        console.log("Dai balance after second borrow", (await ctx.tokens.mockDai.balanceOf(bob.address)).toString())
+        console.log((await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address)).toString());
+
+        // Repay
+      //  console.log(userData.totalDebtETH.toString()); 
+      //   await ctx.aaveFixture.lendingPool.connect(bob.wallet).repay(ctx.tokens.mockDai.address, ether(8000), 1, bob.address);
+      //   let finalDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+      //   expect(finalDaiBalance).to.approx(initDaiBalance);
+      //   userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+      //   console.log("debt after repay ", userData.totalDebtETH.toString());
+
+      //   // No debt
+      //  expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.lt(ether(0.0001));
+
+    });
+
+
     it("SubjectModule deposits weth and borrows against it on behalf of zooToken", async ()=>{
        let wethAmount = 10;
        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
@@ -266,14 +345,14 @@ describe("Controller", () => {
     /**
      * 
      */
-    it.only("Rebalancing tests - verify ratio between deposit and debt compatible with aimed leverage", async ()=>{
+    it("Rebalancing tests - verify ratio between deposit and debt compatible with aimed leverage", async ()=>{
        let wethAmount = 10;
        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
        await ctx.subjectModule.issue(zToken.address, ether(10000), ether(800), ether(1000), 985);
 
        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
        console.log(userData.availableBorrowsETH.toString());
-       await ctx.subjectModule.redeem(zToken.address, ether(6), 985);
+       await ctx.subjectModule.redeem(zToken.address, ether(8), 985);
        userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
        console.log(userData.availableBorrowsETH.toString());
        

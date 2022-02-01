@@ -119,6 +119,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
      *
      * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
      * TODO: Integration Registry should be the provider of the calldata
+     * TODO: Borrow all available amount of DAI thru getUserAccountData
      * DONE: Leverage token is meant to be the object invoking the function trading calls
      *
      * @param quantity_         Quantity of quote token input to go long 
