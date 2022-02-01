@@ -85,7 +85,6 @@ interface IZooToken is IERC20 {
       bytes data;
     }
 
-
     /* ============ Functions ============ */
     
     function addComponent(address _component) external;
@@ -102,6 +101,8 @@ interface IZooToken is IERC20 {
 
     function addDebt(address _account, uint256 _quantity) external;
     function payDebt(address _account, uint256 _quantity) external;
+    function getDebt(address _account) external view returns (uint256);
+    function transferAsset( IERC20 _asset, address _to, uint256 _amount ) external;
     function mint(address _account, uint256 _quantity) external;
     function burn(address _account, uint256 _quantity) external;
 

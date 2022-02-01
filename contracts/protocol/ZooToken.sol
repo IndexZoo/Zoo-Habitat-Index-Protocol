@@ -21,8 +21,10 @@ pragma experimental "ABIEncoderV2";
 
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/SafeCast.sol";
 import { SafeMath } from "@openzeppelin/contracts/math/SafeMath.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import { SignedSafeMath } from "@openzeppelin/contracts/math/SignedSafeMath.sol";
 
 import { IController } from "../interfaces/IController.sol";
@@ -142,6 +144,7 @@ contract ZooToken is ERC20 {
 
     /*============= Zoo Leverage =======================*/
     // The debts represents the amount being borrowed by issuer on Aave via the Token 
+    // TODO: to be accessed only by module?
     mapping(address => uint256) private _debts;
 
     // Summation of all debts
@@ -216,6 +219,26 @@ contract ZooToken is ERC20 {
         emit Invoked(_target, _value, _data, _returnValue);
 
         return _returnValue;
+    }
+
+
+    /**
+     * PRIVELEGED MODULE FUNCTION.  Function that allows a module to transfer asset to  
+     *
+     * @param _asset                 Address of the smart contract to call
+     * @param _to                  Quantity of Ether to provide the call (typically 0)
+     * @param _amount                   Encoded function selector and arguments
+     */
+    function transferAsset(
+        IERC20 _asset,
+        address _to,
+        uint256 _amount
+    )
+        external
+        onlyModule
+        whenLockedOnlyLocker
+    {
+        SafeERC20.safeTransfer( _asset, _to, _amount);
     }
 
     /**
@@ -456,6 +479,12 @@ contract ZooToken is ERC20 {
     }
 
     /* ============ External Getter Functions ============ */
+    /**
+     * Retrieve account debt in quoteToken
+     */
+    function getDebt(address _account) external view returns (uint256) {
+        return _debts[_account] ;
+    }
 
     function getComponents() external view returns(address[] memory) {
         return components;
