@@ -27,6 +27,8 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 import { IController } from "../../interfaces/IController.sol";
 import { IUniswapV2Router } from "../../interfaces/external/IUniswapV2Router.sol";
 import { ILendingPool } from "../../interfaces/external/aave-v2/ILendingPool.sol";
+import { ILendingPoolAddressesProvider } from "../../interfaces/external/aave-v2/ILendingPoolAddressesProvider.sol";
+import { IPriceOracleGetter } from "../../interfaces/external/aave-v2/IPriceOracleGetter.sol";
 import { Invoke } from "../lib/Invoke.sol";
 import { IZooToken } from "../../interfaces/IZooToken.sol";
 import { IssuanceValidationUtils } from "../lib/IssuanceValidationUtils.sol";
@@ -68,6 +70,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     }
     ILendingPool public lender;
     IUniswapV2Router public router;
+    ILendingPoolAddressesProvider public addressesProvider;
     IERC20 public weth; // 
     IERC20 public dai;
 
@@ -176,7 +179,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
       * OR repay (eps^2) and withdraw (1) 
       * Know what to do by checking availableBorrowsETH
      *
-     * TODO: Might need to do rebalance (investigate) ?      
+     * TODO: Might need to do rebalance (investigate) ?
+     * TODO: Check and liquidate all balance if debt is greater than balance of user      
      *
      * @param quantity_         Quantity of token to be redeemed 
      */
@@ -190,11 +194,13 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         onlyValidAndInitializedSet(zooToken_)
     {
         uint256 userZooBalance = zooToken_.balanceOf(msg.sender);
-        require(quantity_ <= userZooBalance, "Not enough NAV for user" );
+        require(quantity_ <= userZooBalance, "L3xIssuance: Not enough NAV" );
+
+        uint256 tokenBaseBalance = weth.balanceOf(address(zooToken_));
+        require(quantity_ < tokenBaseBalance, "L3xIssuance: Not enough liquid");
 
         uint256 userDebtInQuote = zooToken_.getDebt(msg.sender);
-        uint256 tokenBaseBalance = weth.balanceOf(address(zooToken_));
-        // TODO: implement redeem logic
+        
         address[] memory path = new address[](2);
         path[0] = address(dai); 
         path[1] = address(weth);
@@ -210,41 +216,23 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         // TODO: Check token has enough balance
         // TODO: Implement in a function
         // TODO: retrieve exact quantity to be redeemed then make swaps on expense of user paying those fees
-        uint256 amountToWithdraw;
-        if(debtToRepayInBaseCeil > tokenBaseBalance) {
-            // Withdraw
-            console.log("debt > tokenBaseBalanece");
-            // TODO:  repay before withdrawing
-            // _repayDebtForUser(zooToken_, debtToRepayInBaseCeil, debtToRepayInQuote);
-            amountToWithdraw = _invokeWithdraw(zooToken_, address(weth), debtToRepayInBaseCeil - tokenBaseBalance);
-            console.log("Withdrawn");
-            debtToRepayInBaseCeil = amountToWithdraw.add(tokenBaseBalance);  // Accounting for possible difficency in withdrawal
-        }
-        uint256 baseAmountIn = _repayDebtForUser(zooToken_, debtToRepayInBaseCeil, debtToRepayInQuote);
-        // TODO: Transfer remain weth and burn zoos
+        // uint256 amountToWithdraw;
+        // if(debtToRepayInBaseCeil > tokenBaseBalance) {
+        //     // Withdraw
+        //     console.log("debt > tokenBaseBalanece");
+        //     // TODO:  repay before withdrawing
+        //     // _repayDebtForUser(zooToken_, debtToRepayInBaseCeil, debtToRepayInQuote);
+        //     amountToWithdraw = _invokeWithdraw(zooToken_, address(weth), debtToRepayInBaseCeil - tokenBaseBalance);
+        //     console.log("Withdrawn");
+        //     debtToRepayInBaseCeil = amountToWithdraw.add(tokenBaseBalance);  // Accounting for possible difficency in withdrawal
+        // }
+        uint256 baseAmountRepaid = _repayDebtForUser(zooToken_, debtToRepayInBaseCeil, debtToRepayInQuote);
+        zooToken_.payDebt(msg.sender, baseAmountRepaid);
+        _finalizeRedeem(zooToken_, quantity_, baseAmountRepaid);
 
-        // -----------------
+        // TODO: Transfer remain (quantity_ - baseAmountRepaid) weth and burn zoos
 
-        // uint amountWithdrawn = quantity_.sub(debtToRepayInBase);
-        // zooToken_.transferAsset(weth, msg.sender, amountWithdrawn); 
-
-        // TODO: Event for redeem
-    //     dai.transferFrom(msg.sender, address(zooToken_), quantity_);
-    //     // swap dai for baseToken
-    //     uint256 amountOut = _swapQuoteForBase(zooToken_, quantity_, _multiplyByFactorSwap(quantity_, swapFactorx1000_, basePriceInQuotes_)); 
-    //     uint256 borrowAmount;
-    //     uint256 totalAmountOut = amountOut;
-    //     uint256 totalBorrowAmount;
-    //     for (uint8 i = 0; i < 2; i++) {
-    //         borrowAmount = _borrowQuoteForBaseCollateral(zooToken_, amountOut, amountPerBase_);
-    //         amountOut = _swapQuoteForBase(zooToken_, borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, basePriceInQuotes_));
-    //         totalAmountOut = totalAmountOut.add(amountOut);
-    //         totalBorrowAmount = totalBorrowAmount.add(totalBorrowAmount);
-    //     }
-    //     // Borrow quoteToken from lending Protocol
-    //     zooToken_.addDebt(msg.sender, totalBorrowAmount);
-    //     zooToken_.mint(msg.sender, totalAmountOut);
-    //     require(totalAmountOut != 0, "L3xIssueMod: Leveraging failed");
+        // TODO: TODO: call rebalance
     }
 
     /**
@@ -276,6 +264,17 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         console.logUint(availableBorrowsETH);
     }
 
+    function _finalizeRedeem (
+        IZooToken zooToken_,
+        uint256 quantity_,
+        uint256 debtRepaid_
+    ) 
+    private 
+    {
+        zooToken_.burn(msg.sender, quantity_);
+        zooToken_.transferAsset(weth, msg.sender, quantity_.sub(debtRepaid_));
+    }
+
 
 
     function setLendingPool( ILendingPool lender_) external 
@@ -287,6 +286,11 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     // onlySetManager(setToken_, msg.sender) 
     {
         router = router_;
+    }
+
+    function setAddressesProvider(ILendingPoolAddressesProvider provider) external 
+    {
+        addressesProvider = provider;
     }
 
     function removeModule() external override {}
@@ -316,8 +320,9 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         _invokeApprove(zooToken, address(weth), address(lender), depositAmount);
         _invokeDeposit(zooToken, address(weth), depositAmount);
         // approve lender to receive swapped baseToken
-        notionalBorrowAmount = borrowAmountPerBase.mul(  depositAmount).div (1 ether);
-        _invokeBorrow(zooToken, address(dai), notionalBorrowAmount);
+        notionalBorrowAmount = _borrowAvailableAmount(zooToken);
+        // notionalBorrowAmount = borrowAmountPerBase.mul(  depositAmount).div (1 ether);
+        // _invokeBorrow(zooToken, address(dai), notionalBorrowAmount);
         // TODO: ensure borrow took place ?
     }
     function _swapQuoteForBase(
@@ -350,6 +355,22 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         baseAmountIn = _invokeSwap(zooToken_, debtToRepayInQuote, debtToRepayInBaseCeil, Side.Bear)[0];
         _invokeApprove(zooToken_, address(dai), address(lender), debtToRepayInQuote);
         _invokeRepay(zooToken_, address(dai), debtToRepayInQuote);
+    }
+
+    function _borrowAvailableAmount(
+        IZooToken zooToken_
+    )
+    private
+    returns (uint256 quoteAmountToBorrow)
+    {
+        (,,uint256 availableBorrowsETH,,,) = lender.getUserAccountData(address(zooToken_));
+        address oracle = addressesProvider.getPriceOracle();
+        
+        uint256 quotePriceInETH = IPriceOracleGetter(oracle).getAssetPrice(address(dai));
+        // borrow 99% of what available (otherwise reverts)
+        quoteAmountToBorrow = availableBorrowsETH.mul(0.99 ether).div(quotePriceInETH);
+        _invokeBorrow(zooToken_, address(dai), quoteAmountToBorrow);
+        // TODO: verify quantity borrowed
     }
 
     /**

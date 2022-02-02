@@ -101,6 +101,12 @@ class Context {
       await this.subjectModule.initialize(deployedZooToken.address);
   }
 
+  public async issueZoos(zoo: ZooToken, amount: BigNumber, price: BigNumber, to: Account): Promise<void> {
+       await this.tokens.mockDai.mint(to.address, amount);
+       await this.tokens.mockDai.connect(to.wallet).approve(this.subjectModule.address, amount);
+       await this.subjectModule.connect(to.wallet).issue(zoo.address, amount, ether(800), price,  985);
+  }
+
   public async initialize() : Promise<void>  {
     [
       this.accounts.owner,
@@ -144,6 +150,7 @@ class Context {
       );
       await this.subjectModule.setLendingPool(this.aaveFixture.lendingPool.address);
       await this.subjectModule.setRouter(this.router.address);
+      await this.subjectModule.setAddressesProvider(this.aaveFixture.lendingPoolAddressesProvider.address);
 
       await this.ct.controller.initialize(
         [this.ct.creator.address],
@@ -160,6 +167,8 @@ describe("Controller", () => {
   let zToken: ZooToken;
   let owner: Account;
   let bob: Account;
+  let alice: Account;
+  let oscar: Account;
   let mockSubjectModule: Account;
   before(async () => {
 
@@ -172,6 +181,8 @@ describe("Controller", () => {
       zToken = ctx.zoos[0];
       owner = ctx.accounts.owner;
       bob = ctx.accounts.bob;
+      alice = ctx.accounts.alice;
+      oscar = ctx.accounts.oscar;
       mockSubjectModule = ctx.accounts.mockSubjectModule;
     });
     it("Verify ZooToken created via ZooTokenCreator", async () => {
@@ -237,7 +248,7 @@ describe("Controller", () => {
      * EXPECT DAI balance of Bob to be the same as initial DAI balance
      * EXPECT debt position to be nil
      */
-    it.only("Verify Interaction with Aave fixture directly - double deposit and repayments", async ()=>{
+    it("Verify Interaction with Aave fixture directly - double deposit and repayments", async ()=>{
         await ctx.tokens.weth.connect(bob.wallet).deposit({value: ether(10)});
         let daiPriceInEth = await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address);
         let ethPriceInDai = ether(1).mul(ether(1)).div(daiPriceInEth);
@@ -322,25 +333,30 @@ describe("Controller", () => {
        expect(await ctx.tokens.weth.balanceOf(zToken.address)).to.be.gt(ether(wethAmount/2)).to.be.lt(ether(wethAmount*0.64));
     });
 
-    // TODO: create test for debts checking 
+    // TODO: create test for debts checking
+    
+    describe.only("Redeeming scenarios ", async () =>{
+      // TODO: TODO: Scenarios in one dexcribe for several issues and redeem (check zoo burnt)
+      /**
+       * 
+       */
+      it("Investor issues tokens then redeems a portion of it - verify right amount redeemed", async ()=>{
+        let wethAmount = 10;
+        await ctx.issueZoos(zToken, ether(10000), ether(1000), bob);
+        await ctx.issueZoos(zToken, ether(10000), ether(1010), alice);
+        await ctx.issueZoos(zToken, ether(10000), ether(1020), oscar);
 
-    /**
-     * 
-     */
-    it("Investor issues tokens then redeems a portion of it - verify right amount redeemed", async ()=>{
-       let wethAmount = 10;
-       await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-       await ctx.subjectModule.issue(zToken.address, ether(10000), ether(800), ether(1000), 985);
-       console.info("zoo balance of owner ", (await zToken.balanceOf(owner.address)).toString());
-
-
-       let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-       console.info("Health factor before ", userData.healthFactor.toString());
-       await ctx.subjectModule.redeem(zToken.address, ether(6), 985);
-       userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-       console.info("Health factor after ", userData.healthFactor.toString());
-       
+        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+        console.info("Health factor before ", userData.healthFactor.toString());
+        console.info("Zoo token held before redeem ", (await zToken.balanceOf(bob.address)).toString());
+        await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, ether(18), 985);
+        userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+        console.info("Health factor after ", userData.healthFactor.toString());
+        console.info("Zoo token held after redeem ", (await zToken.balanceOf(bob.address)).toString());
+        
+      });
     });
+
 
     /**
      * 
