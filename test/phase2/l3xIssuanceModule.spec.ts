@@ -29,7 +29,8 @@ import { ZooToken } from "@typechain/ZooToken";
 import { ZooTokenCreator } from "@typechain/ZooTokenCreator";
 import { Controller } from "@typechain/Controller";
 
-// TODO: Tests with prices change (losses, wins)
+// TODO: TODO: Tests with prices change (losses, wins)
+// TODO: Consider upgradeability test (changing factors - maintaining state of token)
 
 const expect = getWaffleExpect();
 
@@ -84,6 +85,9 @@ class Context {
   public subjectModule: L3xIssuanceModule;
   public router: UniswapV2Router02;
 
+  /**
+   * @dev creates Zoo Leverage Token via a contract factory
+   */
   public async createZooToken(): Promise<void> {
       const tx =  await this.ct.creator.create(
         [this.tokens.mockDai.address],
@@ -120,6 +124,17 @@ class Context {
        await this.tokens.mockDai.mint(to.address, amount);
        await this.tokens.mockDai.connect(to.wallet).approve(this.subjectModule.address, amount);
        await this.subjectModule.connect(to.wallet).issue(zoo.address, amount, price,  985);
+  }
+
+  public async configureZoo(zoo: ZooToken): Promise<void> {
+    await this.subjectModule.setConfigForToken(
+      zoo.address, 
+      {
+        lender: this.aaveFixture.lendingPool.address,
+        router: this.router.address,
+        addressesProvider: this.aaveFixture.lendingPoolAddressesProvider.address
+      }
+    )
   }
 
   public async initialize() : Promise<void>  {
@@ -163,9 +178,6 @@ class Context {
         this.tokens.weth.address, 
         this.tokens.mockDai.address
       );
-      await this.subjectModule.setLendingPool(this.aaveFixture.lendingPool.address);
-      await this.subjectModule.setRouter(this.router.address);
-      await this.subjectModule.setAddressesProvider(this.aaveFixture.lendingPoolAddressesProvider.address);
 
       await this.ct.controller.initialize(
         [this.ct.creator.address],
@@ -199,6 +211,8 @@ describe("Controller", () => {
       alice = ctx.accounts.alice;
       oscar = ctx.accounts.oscar;
       mockSubjectModule = ctx.accounts.mockSubjectModule;
+
+      await ctx.configureZoo(zToken);
     });
     describe("Verify Interaction with Aave fixture directly", async () => {
       it("Verify ZooToken created via ZooTokenCreator", async () => {
@@ -495,6 +509,12 @@ describe("Controller", () => {
 
         await doRedeem(bob, MAX_UINT_256);
         await doRedeem(alice, ether(0.25)); 
+
+      });
+    });
+
+    describe("Priveleges - ", async () =>  {
+      it(" - verify only manager can call setConfigForToken()", async () => {
 
       });
     });
