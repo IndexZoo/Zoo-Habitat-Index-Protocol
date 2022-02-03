@@ -101,10 +101,25 @@ class Context {
       await this.subjectModule.initialize(deployedZooToken.address);
   }
 
+  public async redeemLoop(doRedeem: Function, account: Account, zToken: ZooToken  ): Promise<void> {
+        let accountZooBalance:BigNumber;
+        let wethZooBalance:BigNumber;
+        let redeemAmount: BigNumber;
+        let c = 0; // general safety to break loops
+        do{
+          if(c++ > 10) break;
+          accountZooBalance = await zToken.balanceOf(account.address);
+          wethZooBalance = await this.tokens.weth.balanceOf(zToken.address);
+          redeemAmount = accountZooBalance > wethZooBalance.mul(90).div(100)? 
+             wethZooBalance.mul(90).div(100): MAX_UINT_256;
+          await doRedeem(account, redeemAmount);
+        } while(redeemAmount !== MAX_UINT_256)
+  }
+
   public async issueZoos(zoo: ZooToken, amount: BigNumber, price: BigNumber, to: Account): Promise<void> {
        await this.tokens.mockDai.mint(to.address, amount);
        await this.tokens.mockDai.connect(to.wallet).approve(this.subjectModule.address, amount);
-       await this.subjectModule.connect(to.wallet).issue(zoo.address, amount, ether(800), price,  985);
+       await this.subjectModule.connect(to.wallet).issue(zoo.address, amount, price,  985);
   }
 
   public async initialize() : Promise<void>  {
@@ -185,175 +200,302 @@ describe("Controller", () => {
       oscar = ctx.accounts.oscar;
       mockSubjectModule = ctx.accounts.mockSubjectModule;
     });
-    it("Verify ZooToken created via ZooTokenCreator", async () => {
-      expect(await ctx.zoos[0].modules(0)).to.be.eq(ctx.subjectModule.address);
-      expect(await ctx.zoos[0].isInitializedModule(ctx.subjectModule.address)).to.be.true;
-      expect(await ctx.zoos[0].name()).to.be.eq("eth long");
-      expect(await ctx.zoos[0].symbol()).to.be.eq("BULL");
-    });
-    it("Verify Interaction with Aave fixture directly - Borrow from aave and check debt", async ()=>{
-        await ctx.tokens.weth.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
-        await ctx.tokens.weth.connect(mockSubjectModule.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
-        await ctx.tokens.mockDai.connect(owner.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+    describe("Verify Interaction with Aave fixture directly", async () => {
+      it("Verify ZooToken created via ZooTokenCreator", async () => {
+        expect(await ctx.zoos[0].modules(0)).to.be.eq(ctx.subjectModule.address);
+        expect(await ctx.zoos[0].isInitializedModule(ctx.subjectModule.address)).to.be.true;
+        expect(await ctx.zoos[0].name()).to.be.eq("eth long");
+        expect(await ctx.zoos[0].symbol()).to.be.eq("BULL");
+      });
+      it("- Borrow from aave and check debt", async ()=>{
+          await mockSubjectModule.wallet.sendTransaction({to: ctx.tokens.weth.address, value: ether(20)});
+          await ctx.tokens.weth.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+          await ctx.tokens.weth.connect(mockSubjectModule.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+          await ctx.tokens.mockDai.connect(owner.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
 
-        await ctx.aaveFixture.lendingPool.connect(mockSubjectModule.wallet).deposit(ctx.tokens.weth.address, ether(10), bob.address, ZERO);
-        await ctx.aaveFixture.lendingPool.connect(mockSubjectModule.wallet).deposit(ctx.tokens.weth.address, ether(10), mockSubjectModule.address, ZERO);
-        await ctx.aaveFixture.lendingPool.connect(mockSubjectModule.wallet).borrow(ctx.tokens.mockDai.address, ether(8000), BigNumber.from(1), ZERO, mockSubjectModule.address);
-       
-        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(ctx.subjectModule.address));
-        expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
-    });
-    /**
-     * Bob deposits 10 WETH, then borrows corresponding 8000 DAI
-     * EXPECT DAI balance of Bob increase by borrowed amount
-     * EXPECT debt to be 8000 DAI ~ 8 ETH (calculate via oracle price)
-     * Bob repays debt
-     * EXPECT DAI balance of Bob to be the same as initial DAI balance
-     * EXPECT debt position to be nil
-     */
-    it("Verify Interaction with Aave fixture directly - repay Aave debt", async ()=>{
-        let daiPriceInEth = await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address);
-        let ethPriceInDai = ether(1).mul(ether(1)).div(daiPriceInEth);
-        await ctx.tokens.weth.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
-        await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
-        let initDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
-
-        await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(ctx.tokens.weth.address, ether(10), bob.address, ZERO);
-        await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(ctx.tokens.mockDai.address, ether(8000), BigNumber.from(1), ZERO, bob.address);
-        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
-        let borrowedDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
-        expect(borrowedDaiBalance).to.approx(initDaiBalance.add(ether(8000)));
-        expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(8000));
+          await ctx.aaveFixture.lendingPool.connect(mockSubjectModule.wallet).deposit(ctx.tokens.weth.address, ether(10), bob.address, ZERO);
+          await ctx.aaveFixture.lendingPool.connect(mockSubjectModule.wallet).deposit(ctx.tokens.weth.address, ether(10), mockSubjectModule.address, ZERO);
+          await ctx.aaveFixture.lendingPool.connect(mockSubjectModule.wallet).borrow(ctx.tokens.mockDai.address, ether(8000), BigNumber.from(1), ZERO, mockSubjectModule.address);
         
-        await ctx.aaveFixture.lendingPool.connect(bob.wallet).repay(ctx.tokens.mockDai.address, MAX_UINT_256, 1, bob.address);
-        let finalDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
-        expect(finalDaiBalance).to.approx(initDaiBalance);
-        userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
-
-        // No debt
-        expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(0));
-
-    });
-
-    /**
-     * Purpose of this test is to check borrow allowances with double deposits and partial repays
-     * Bob deposits 10 WETH, then borrows corresponding 8000 DAI
-     * EXPECT DAI balance of Bob increase by borrowed amount
-     * EXPECT debt to be 8000 DAI ~ 8 ETH (calculate via oracle price)
-     * Bob deposits the 8000 DAI after swapping them for 8 ETH
-     * Bob checks available amount to borrow, should be 6.4 ETH
-     * Bob Borrows against that deposited ETH
-     * Bob repays debt second debt 6.4 ETH
-     * Check userData TODO: Look what to expect
-     * EXPECT DAI balance of Bob to be the same as initial DAI balance
-     * EXPECT debt position to be nil
-     */
-    it("Verify Interaction with Aave fixture directly - double deposit and repayments", async ()=>{
-        await ctx.tokens.weth.connect(bob.wallet).deposit({value: ether(10)});
-        let daiPriceInEth = await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address);
-        let ethPriceInDai = ether(1).mul(ether(1)).div(daiPriceInEth);
-        await ctx.tokens.weth.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
-        await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
-        await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.router.address, MAX_UINT_256);
-        let initDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
-
-        // Deposit and Borrow FIRST
-        await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(ctx.tokens.weth.address, ether(10), bob.address, ZERO);
-        await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(ctx.tokens.mockDai.address, ether(8000), BigNumber.from(1), ZERO, bob.address);
-        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
-        let borrowedDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
-        expect(borrowedDaiBalance).to.approx(initDaiBalance.add(ether(8000)));
-        expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(8000));
-        console.log("Borrowed DAI balance after deposit ", borrowedDaiBalance.toString());
-
-        // Swap 
-        console.log((await ctx.tokens.weth.balanceOf(bob.address)).toString());
-        await ctx.router.connect(bob.wallet).swapExactTokensForTokens(
-          ether(8000), 
-          ether(0), 
-          [ctx.tokens.mockDai.address, ctx.tokens.weth.address],
-          bob.address,
-          MAX_UINT_256
-        );
-        let bobWethSwapped = await ctx.tokens.weth.balanceOf(bob.address);
-        await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(
-          ctx.tokens.weth.address, 
-          bobWethSwapped, 
-          bob.address, 
-          ZERO
-        );
-        userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
-
-        let avBorrow = userData.availableBorrowsETH.mul(ether(1)).div(
-          await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address)
-        );
-        console.log("amount to Borrow ", avBorrow.toString())
-        console.log("dai balance before second borrow", (await ctx.tokens.mockDai.balanceOf(bob.address)).toString());
-        await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(
-          ctx.tokens.mockDai.address, 
-          avBorrow.mul(999).div(1000),  // borrow 99.9% of available (magic number)
-          BigNumber.from(1), 
-          ZERO, 
-          bob.address
-        );
-        console.log("Dai balance after second borrow", (await ctx.tokens.mockDai.balanceOf(bob.address)).toString())
-        console.log((await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address)).toString());
-
-        // Repay
-      //  console.log(userData.totalDebtETH.toString()); 
-      //   await ctx.aaveFixture.lendingPool.connect(bob.wallet).repay(ctx.tokens.mockDai.address, ether(8000), 1, bob.address);
-      //   let finalDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
-      //   expect(finalDaiBalance).to.approx(initDaiBalance);
-      //   userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
-      //   console.log("debt after repay ", userData.totalDebtETH.toString());
-
-      //   // No debt
-      //  expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.lt(ether(0.0001));
-
-    });
-
-
-    it("SubjectModule deposits weth and borrows against it on behalf of zooToken", async ()=>{
-       let wethAmount = 10;
-       await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-       await ctx.subjectModule.issue(zToken.address, ether(10000), ether(800), ether(1000), 985);
-       
-       let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-
-       // leverage represented in thousands (i.e. 2500 leverage ~ 2.5x leverage)
-       let leverage = ether(wethAmount).add(userData.totalDebtETH).mul(1000).div(ether(wethAmount));
-
-       expect(leverage).to.be.gt(2000);   // leverage ~ 2425 for minimum healthFactor/maximum risk
-       expect(userData.currentLiquidationThreshold).to.gt(BigNumber.from(8000));
-       expect(userData.totalCollateralETH).to.be.gt(ether(wethAmount)).to.be.lt(ether(20));
-       expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
-       expect(await zToken.balanceOf(owner.address)).to.be.gt(ether(20));
-
-       // amount weth expected on the second borrow = 10 * 0.8 * 0.8 - fees
-       expect(await ctx.tokens.weth.balanceOf(zToken.address)).to.be.gt(ether(wethAmount/2)).to.be.lt(ether(wethAmount*0.64));
-    });
-
-    // TODO: create test for debts checking
-    
-    describe.only("Redeeming scenarios ", async () =>{
-      // TODO: TODO: Scenarios in one dexcribe for several issues and redeem (check zoo burnt)
+          let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(mockSubjectModule.address));
+          expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
+      });
       /**
-       * 
+       * Bob deposits 10 WETH, then borrows corresponding 8000 DAI
+       * EXPECT DAI balance of Bob increase by borrowed amount
+       * EXPECT debt to be 8000 DAI ~ 8 ETH (calculate via oracle price)
+       * Bob repays debt
+       * EXPECT DAI balance of Bob to be the same as initial DAI balance
+       * EXPECT debt position to be nil
+       */
+      it("- repay Aave debt", async ()=>{
+          let daiPriceInEth = await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address);
+          let ethPriceInDai = ether(1).mul(ether(1)).div(daiPriceInEth);
+          // Fund bob with weth & dai
+          await bob.wallet.sendTransaction({to: ctx.tokens.weth.address, value: ether(10)});
+          await ctx.tokens.mockDai.mint(bob.address, ether(100));
+
+
+          await ctx.tokens.weth.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+          await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+          let initDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+
+          await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(ctx.tokens.weth.address, ether(10), bob.address, ZERO);
+          await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(ctx.tokens.mockDai.address, ether(8000), BigNumber.from(1), ZERO, bob.address);
+          let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+          let borrowedDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+          expect(borrowedDaiBalance).to.approx(initDaiBalance.add(ether(8000)));
+          expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(8000));
+         
+          // Repay all the debt on bob to AAVE  (i.e. MAX_UINT_256)
+          await ctx.aaveFixture.lendingPool.connect(bob.wallet).repay(ctx.tokens.mockDai.address, MAX_UINT_256, 1, bob.address);
+          let finalDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+          expect(finalDaiBalance).to.approx(initDaiBalance);
+          userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+
+          // No debt
+          expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(0));
+
+      });
+
+      /**
+       * Purpose of this test is to check borrow allowances with double deposits and partial repays
+       * Bob deposits 10 WETH, then borrows corresponding 8000 DAI
+       * EXPECT DAI balance of Bob increase by borrowed amount
+       * EXPECT debt to be 8000 DAI ~ 8 ETH (calculate via oracle price)
+       * Bob deposits the 8000 DAI after swapping them for 8 ETH
+       * Bob checks available amount to borrow, should be 6.4 ETH
+       * Bob Borrows against that deposited ETH
+       * Bob repays debt second debt 6.4 ETH
+       * Check userData on AAVE
+       * EXPECT DAI balance of Bob to be the same as initial DAI balance
+       * EXPECT debt position to be nil
+       */
+      it("double deposit and repayments", async ()=>{
+          await ctx.tokens.weth.connect(bob.wallet).deposit({value: ether(10)});
+          let daiPriceInEth = await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address);
+          let ethPriceInDai = ether(1).mul(ether(1)).div(daiPriceInEth);
+          await ctx.tokens.weth.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+          await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.aaveFixture.lendingPool.address, MAX_UINT_256);
+          await ctx.tokens.mockDai.connect(bob.wallet).approve(ctx.router.address, MAX_UINT_256);
+          let initDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+
+          // Deposit and Borrow FIRST
+          await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(ctx.tokens.weth.address, ether(10), bob.address, ZERO);
+          await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(ctx.tokens.mockDai.address, ether(8000), BigNumber.from(1), ZERO, bob.address);
+          let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+          let borrowedDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+          expect(borrowedDaiBalance).to.approx(initDaiBalance.add(ether(8000)));
+          expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.approx(ether(8000));
+          expect(borrowedDaiBalance).to.be.eq(ether(8000));
+
+          // Swap 
+          await ctx.router.connect(bob.wallet).swapExactTokensForTokens(
+            ether(8000), 
+            ether(0), 
+            [ctx.tokens.mockDai.address, ctx.tokens.weth.address],
+            bob.address,
+            MAX_UINT_256
+          );
+          let bobWethSwapped = await ctx.tokens.weth.balanceOf(bob.address);
+          await ctx.aaveFixture.lendingPool.connect(bob.wallet).deposit(
+            ctx.tokens.weth.address, 
+            bobWethSwapped, 
+            bob.address, 
+            ZERO
+          );
+          userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+
+          let avBorrow = userData.availableBorrowsETH.mul(ether(1)).div(
+            await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address)
+          );
+
+          // Expect amount to borrow after second deposit to be 10000*0.8*0.8 DAI 
+          expect(avBorrow).to.be.approx(ether(10000*0.8*0.8));
+          initDaiBalance =  await ctx.tokens.mockDai.balanceOf(bob.address);
+          await ctx.aaveFixture.lendingPool.connect(bob.wallet).borrow(
+            ctx.tokens.mockDai.address, 
+            avBorrow.mul(999).div(1000),  // borrow 99.9% of available (magic number)
+            BigNumber.from(1), 
+            ZERO, 
+            bob.address
+          );
+          let finalDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+          expect(finalDaiBalance.sub(initDaiBalance)).to.be.eq(avBorrow.mul(999).div(1000));
+          let assetPrice = await ctx.aaveFixture.fallbackOracle.getAssetPrice(ctx.tokens.mockDai.address);
+
+          // Repay
+        //  console.log(userData.totalDebtETH.toString()); 
+        //   await ctx.aaveFixture.lendingPool.connect(bob.wallet).repay(ctx.tokens.mockDai.address, ether(8000), 1, bob.address);
+        //   let finalDaiBalance = await ctx.tokens.mockDai.balanceOf(bob.address);
+        //   expect(finalDaiBalance).to.approx(initDaiBalance);
+        //   userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bob.address));
+        //   console.log("debt after repay ", userData.totalDebtETH.toString());
+
+        //   // No debt
+        //  expect(userData.totalDebtETH.mul(ethPriceInDai).div(ether(1))).to.be.lt(ether(0.0001));
+
+      });
+    });
+
+    describe("SubjectModule Issuing", async () => {
+      it("SubjectModule deposits weth and borrows against it on behalf of zooToken", async ()=>{
+        let wethAmount = 10;
+        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
+        await ctx.subjectModule.issue(zToken.address, ether(10000), ether(1000), 985);
+        
+        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+
+        // leverage represented in thousands (i.e. 2500 leverage ~ 2.5x leverage)
+        let leverage = ether(wethAmount).add(userData.totalDebtETH).mul(1000).div(ether(wethAmount));
+
+        expect(leverage).to.be.gt(2000);   // leverage ~ 2425 for minimum healthFactor/maximum risk
+        expect(userData.currentLiquidationThreshold).to.gt(BigNumber.from(8000));
+        expect(userData.totalCollateralETH).to.be.gt(ether(wethAmount)).to.be.lt(ether(20));
+        expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
+        expect(await zToken.balanceOf(owner.address)).to.be.gt(ether(20));
+
+        // amount weth expected on the second borrow = 10 * 0.8 * 0.8 - fees
+        expect(await ctx.tokens.weth.balanceOf(zToken.address)).to.be.gt(ether(wethAmount/2)).to.be.lt(ether(wethAmount*0.64));
+      });
+    });
+
+    describe("Debt in Zoo Leverage Token ", async () => {
+     /**
+       * user issue zoo tokens with amount 10000 DAI 
+       * EXPECT user debt to increase accordingly 
+       */
+      it("Investor issues tokens debt is initiated ", async ()=>{
+        let initDaiBalance = ether(10000);
+        let initWethAmount = ether(10);
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
+
+        let initZooBalance = await zToken.balanceOf(bob.address);
+        let initUserDebt = await zToken.getDebt(bob.address);
+
+        // (initWethAmount*0.8 + initWethAmount * 0.8 * 0.8 ) * 1000
+        let expectedFinalUserDebt = initWethAmount.mul(ether(0.8)).add(initWethAmount.mul(ether(0.8*0.8))).div(ether(1)).mul(1000);
+
+        // Expect to have no balance available for borrowing before calling the redeem
+        // Expect to have avaialable margin to borrow from after the redeem call
+        let zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+
+        // Expect WETH balance after redeem to be initWethAmount*redeemAmount/initZooBalance
+        expect(await zToken.getDebt(bob.address)).to.be.approx(expectedFinalUserDebt)
+        expect(await zToken.getDebt(bob.address)).to.be.approx(zooAaveData.totalDebtETH.mul(1000));
+        
+      });
+    });
+    
+    describe("Redeeming scenarios ", async () =>{
+      /**
+       * 3 users issue zoo tokens with equal amounts
+       * One user decided to redeem part of the tokens (redeemable tokens)
+       * Redeem amount is 0.9 of zToken weth Balance
+       * EXPECT user retrieve expected weth (baseToken) balance
+       * EXPECT user have the redeemed zoo tokens burnt
+       * EXPECT debt to decrease by expected amount
        */
       it("Investor issues tokens then redeems a portion of it - verify right amount redeemed", async ()=>{
-        let wethAmount = 10;
-        await ctx.issueZoos(zToken, ether(10000), ether(1000), bob);
-        await ctx.issueZoos(zToken, ether(10000), ether(1010), alice);
-        await ctx.issueZoos(zToken, ether(10000), ether(1020), oscar);
+        let initDaiBalance = ether(10000);
+        let initWethAmount = ether(10);
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1010), alice); // Price increased due to change in Uniswap pool
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1020), oscar);
 
-        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-        console.info("Health factor before ", userData.healthFactor.toString());
-        console.info("Zoo token held before redeem ", (await zToken.balanceOf(bob.address)).toString());
-        await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, ether(18), 985);
-        userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-        console.info("Health factor after ", userData.healthFactor.toString());
-        console.info("Zoo token held after redeem ", (await zToken.balanceOf(bob.address)).toString());
+        let initZooBalance = await zToken.balanceOf(bob.address);
+        let initUserDebt = await zToken.getDebt(bob.address);
+        let zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+        let redeemAmount = (await ctx.tokens.weth.balanceOf(zToken.address)).mul(90).div(100);
+
+        // initDebt - initDebt*redeemAmount/initZooBalance
+        let expectedFinalUserDebt = initUserDebt.sub( redeemAmount.mul(initUserDebt).div(initZooBalance) );
+
+        // Expect to have no balance available for borrowing before calling the redeem
+        expect(zooAaveData.availableBorrowsETH).to.be.lt(ether(0.01));  // almost no available ETH to borrow
+        await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, redeemAmount);
+        // Expect to have avaialable margin to borrow from after the redeem call
+        let finalZooBalance = await zToken.balanceOf(bob.address);
+        zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+
+        // Expect WETH balance after redeem to be initWethAmount*redeemAmount/initZooBalance
+        expect(await ctx.tokens.weth.balanceOf(bob.address)).to.be.approx(initWethAmount.mul(redeemAmount).div(initZooBalance));
+        expect(await zToken.getDebt(bob.address)).to.be.approx(expectedFinalUserDebt);
+        expect(initZooBalance.sub(finalZooBalance)).to.be.approx(redeemAmount);
         
+      });
+
+      /**
+       * @dev 3 users issue zoo tokens
+       * One user decided to redeem all of the tokens
+       * EXPECT user retrieve expected weth (baseToken) balance
+       * EXPECT user have all his zoo tokens burnt
+       * EXPECT debt is removed on user 
+       * @dev Note that much less amount of initDaiBalance is chosen 
+       * in order to decrease the significance of price increase on uniswap
+       */
+      it("Investor issues tokens then redeems all  of it", async ()=>{
+        let initDaiBalance = ether(100);
+        let initWethAmount = ether(0.1);
+        let redeemAmount = MAX_UINT_256;  // implies redeeming all zoo balance
+
+        // There's enough liquidity for bob to redeem all his balance
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
+        await ctx.issueZoos(zToken, initDaiBalance.mul(4), ether(1002), alice); 
+        await ctx.issueZoos(zToken, initDaiBalance.mul(2), ether(1005), oscar);
+
+        let initZooBalance = await zToken.balanceOf(bob.address);
+        let zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+        let expectedFinalUserDebt = ether(0);
+
+        await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, redeemAmount);
+        let finalZooBalance = await zToken.balanceOf(bob.address);
+        zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+        let finalWethBalance = await ctx.tokens.weth.balanceOf(bob.address);
+
+        // Expect WETH balance after redeem to be initWethAmount*redeemAmount/initZooBalance
+        expect(finalWethBalance).to.be.approx(initWethAmount);
+        expect(await zToken.getDebt(bob.address)).to.be.equal(expectedFinalUserDebt);
+        expect(finalZooBalance).to.be.equal(ether(0));
+        
+      });
+      /**
+       * @dev 3 users issue zoo tokens
+       * 
+       * EXPECT users retrieve expected weth (baseToken) balance
+       * EXPECT users have all his zoo tokens burnt
+       * EXPECT debts is removed on users 
+       */
+      it("Investors issues tokens then they redeem ", async ()=>{
+
+        let initDaiBalance = ether(100);
+        let initWethAmount = ether(0.1);
+
+        // There's enough liquidity for bob to redeem all his balance
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1002), oscar);
+        await ctx.issueZoos(zToken, initDaiBalance.mul(4), ether(1003), alice); 
+
+        let initZooBalance = await zToken.balanceOf(bob.address);
+        let zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+        let expectedFinalUserDebt = ether(0);
+
+        const doRedeem = async (account: Account, redeemAmount: BigNumber) => {
+          await ctx.subjectModule.connect(account.wallet).redeem(zToken.address, redeemAmount);
+          let finalAccountZooBalance = await zToken.balanceOf(account.address);
+          zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
+          let finalAccountWethBalance = await ctx.tokens.weth.balanceOf(account.address);
+
+          if (redeemAmount == MAX_UINT_256) {
+            expect(finalAccountWethBalance).to.be.approx(initWethAmount);
+            expect(await zToken.getDebt(account.address)).to.be.equal(expectedFinalUserDebt);
+            expect(finalAccountZooBalance).to.be.equal(ether(0));
+          } 
+        };
+
+        await doRedeem(bob, MAX_UINT_256);
+        await doRedeem(alice, ether(0.25)); 
+
       });
     });
 
@@ -361,14 +503,15 @@ describe("Controller", () => {
     /**
      * 
      */
-    it("Rebalancing tests - verify ratio between deposit and debt compatible with aimed leverage", async ()=>{
-       let wethAmount = 10;
+    it.skip("Rebalancing tests - verify ratio between deposit and debt compatible with aimed leverage", async ()=>{
+      // @dev at this stage rebalancing takes place after redeem()   
+      let wethAmount = 10;
        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-       await ctx.subjectModule.issue(zToken.address, ether(10000), ether(800), ether(1000), 985);
+       await ctx.subjectModule.issue(zToken.address, ether(10000), ether(1000), 985);
 
        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-       console.log(userData.availableBorrowsETH.toString());
-       await ctx.subjectModule.redeem(zToken.address, ether(8), 985);
+       console.log((await ctx.tokens.weth.balanceOf(zToken.address)).toString());
+       await ctx.subjectModule.redeem(zToken.address, ether(5));
        userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
        console.log(userData.availableBorrowsETH.toString());
        
