@@ -4,6 +4,7 @@ import "../ztypes";
 import { Account } from "@utils/test/types";
 import { ADDRESS_ZERO, MAX_UINT_256, ZERO } from "@utils/constants";
 import { 
+  IntegrationRegistry,
   StandardTokenMock,
     UniswapV2Router02,
 } from "@utils/contracts";
@@ -18,6 +19,10 @@ import {
 import { ethers } from "hardhat";
 import { bitcoin, ether } from "@utils/common/unitsUtils";
 import { abi as ZooTokenABI } from "../../artifacts/contracts/protocol/ZooToken.sol/ZooToken.json";
+import { abi as AaveLendingAdapterABI } 
+  from "../../artifacts/contracts/protocol/integration/l3x/AaveLendingAdapter.sol/AaveLendingAdapter.json";
+import { abi as UniswapAdapterABI } 
+  from "../../artifacts/contracts/protocol/integration/l3x/UniswapV2ExchangeAdapterV3.sol/UniswapV2ExchangeAdapterV3.json";
 
 //for aave
 import {  AaveV2Fixture } from "@utils/fixtures";
@@ -30,12 +35,19 @@ import { ZooTokenCreator } from "@typechain/ZooTokenCreator";
 import { Controller } from "@typechain/Controller";
 import { UniswapV2Router02Mock } from "@typechain/UniswapV2Router02Mock";
 import { IWETH } from "@typechain/IWETH";
+import { AaveLendingAdapter } from "@typechain/AaveLendingAdapter";
+import { UniswapV2ExchangeAdapterV3 } from "@typechain/UniswapV2ExchangeAdapterV3";
 
 // TODO: Tests with prices change (losses, wins) (MORE)
 // TODO: deal with trick of depositing at different prices
 // TODO: Consider upgradeability test (changing factors in Module - maintaining state of token)
 
 const expect = getWaffleExpect();
+
+const INTEGRATION_REGISTRY_RESOURCE_ID = 0;
+const INTEGRATION_REGISTRY_LEND_RESOURCE_ID  = 1;
+const AAVE_ADAPTER_NAME = "AAVE";
+const UNISWAP_ADAPTER_NAME = "UNISWAP";
 
 const initUniswapRouter = async (owner: Account, weth:  Contract, dai:  StandardTokenMock, btc: StandardTokenMock): Promise<UniswapV2Router02> => {
       let router: UniswapV2Router02;
@@ -87,32 +99,9 @@ interface Contracts {
   controller: Controller;
   zooToken: ZooToken;
   creator: ZooTokenCreator;
+  integrator: IntegrationRegistry;
 }
 
-// interface Pair {
-//   supplier: Account;
-//   token1: string;
-//   token2: string;
-//   liquid1: BigNumber;
-//   liquid2: BigNumber;
-// }
-
-// class UniswapVault {
-//   public pairs: Map< Set<string>, Pair>;
-
-//   public addPair(pair: Pair) {
-//     this.pairs.set(new Set([pair.token1, pair.token2]), pair);
-//   }
-//   /**
-//    * 
-//    * @param pair  a set of two tokens (key for the pairs Map)
-//    * @param price  desired price of token2 in token1
-//    */
-//   public setLiquidity(pair: Set<string>, liquid1: BigNumber, liquid2: BigNumber) {
-//     let liquid1ToAdd = 
-
-//   }
-// }
 
 class Context {
   public accounts= <Accounts>{};
@@ -178,6 +167,18 @@ class Context {
   }
 
   public async configZooWithMockRouter(zoo: ZooToken): Promise<void> {
+    await this.ct.integrator.removeIntegration(
+      this.subjectModule.address, 
+      UNISWAP_ADAPTER_NAME
+    );
+      let mockUniswapProtocolAdapter = await (await ethers.getContractFactory("UniswapV2ExchangeAdapterV3")).deploy(
+        this.mockRouter.address 
+      );
+    await this.ct.integrator.addIntegration(
+      this.subjectModule.address,
+      UNISWAP_ADAPTER_NAME,
+      mockUniswapProtocolAdapter.address
+    )
     await this.subjectModule.setConfigForToken(
       zoo.address, 
       {
@@ -232,12 +233,33 @@ class Context {
         this.tokens.mockDai.address
       );
 
+      this.ct.integrator = await (await ethers.getContractFactory("IntegrationRegistry")).deploy(
+        this.ct.controller.address
+      );
+
       await this.ct.controller.initialize(
         [this.ct.creator.address],
         [this.subjectModule.address],
-        [],[]
-      )
+        [this.ct.integrator.address],
+        [INTEGRATION_REGISTRY_RESOURCE_ID]
+      );
 
+      let lendingProtocolAdapter = await (await ethers.getContractFactory("AaveLendingAdapter")).deploy(
+        this.aaveFixture.lendingPool.address
+      );
+      let uniswapProtocolAdapter = await (await ethers.getContractFactory("UniswapV2ExchangeAdapterV3")).deploy(
+        this.router.address 
+      );
+      await this.ct.integrator.addIntegration(
+        this.subjectModule.address,
+        AAVE_ADAPTER_NAME,
+        lendingProtocolAdapter.address
+      );
+      await this.ct.integrator.addIntegration(
+        this.subjectModule.address,
+        UNISWAP_ADAPTER_NAME,
+        uniswapProtocolAdapter.address
+      );
       await this.createZooToken();
   }
 }
@@ -303,6 +325,64 @@ describe("Controller", () => {
 
         expect(finalWethBalance.sub(initWethBalance)).to.be.eq(ether(1));
         expect(initDaiBalance.sub(finalDaiBalance)).to.be.eq(ether(1000));
+      });
+      it("IntegrationRegistry for UNISWAP connected properly / methodData are matched", async () => {
+        let adapterAddress = await ctx.ct.integrator.getIntegrationAdapter(
+          ctx.subjectModule.address,
+          UNISWAP_ADAPTER_NAME 
+        );
+        let adapter = await ethers.getContractAt(UniswapAdapterABI, adapterAddress) as UniswapV2ExchangeAdapterV3;
+        expect(await adapter.getSpender()).to.be.equal(ctx.router.address);
+
+        let [target, callValue, calldata] = await adapter.getTradeCalldata(
+          ctx.tokens.mockDai.address,
+          ctx.tokens.weth.address,
+          ctx.accounts.bob.address,
+          ether(1000),
+          ether(1),
+          true,
+          "0x" 
+        );
+        let abi = ["function swapExactTokensForTokens(uint256,uint256,address[],address,uint256)"]
+        let expectedCalldata = new ethers.utils.Interface(abi).encodeFunctionData("swapExactTokensForTokens", [
+          ether(1000),
+          ether(1), 
+          [ctx.tokens.mockDai.address, ctx.tokens.weth.address],
+          ctx.accounts.bob.address,
+          (await ethers.provider.getBlock(await ethers.provider.getBlockNumber())).timestamp
+        ]);
+
+        expect(target).to.be.equal(ctx.router.address);
+        expect(callValue).to.be.equal(BigNumber.from(0));
+        expect(calldata).to.be.equal(expectedCalldata);
+      });
+      it("IntegrationRegistry for AAVE connected properly / methodData are matched", async () => {
+        let adapterAddress = await ctx.ct.integrator.getIntegrationAdapter(
+          ctx.subjectModule.address,
+          AAVE_ADAPTER_NAME 
+        );
+        let adapter = await ethers.getContractAt(AaveLendingAdapterABI, adapterAddress) as AaveLendingAdapter;
+        expect(await adapter.getSpender()).to.be.equal(ctx.aaveFixture.lendingPool.address);
+
+        let [target, callValue, calldata] = await adapter.getBorrowCalldata(
+          ctx.tokens.mockDai.address,
+          ether(1),
+          ctx.zoos[0].address
+        );
+
+        let abi = ["function borrow(address,uint256,uint256,uint16,address)"]
+        let expectedCalldata = new ethers.utils.Interface(abi).encodeFunctionData("borrow", [
+          ctx.tokens.mockDai.address,
+          ether(1),
+          BigNumber.from(1),
+          0,
+          ctx.zoos[0].address
+        ]);
+
+
+        expect(target).to.be.equal(ctx.aaveFixture.lendingPool.address);
+        expect(callValue).to.be.equal(BigNumber.from(0));
+        expect(calldata).to.be.equal(expectedCalldata);
       });
     });
     describe("Verify Interaction with Aave fixture directly", async () => {
@@ -442,7 +522,7 @@ describe("Controller", () => {
 
       });
     });
-
+    // TODO: TODO: ensure integration worked 
     describe("SubjectModule Issuing", async () => {
       it("SubjectModule deposits weth and borrows against it on behalf of zooToken", async ()=>{
         let wethAmount = 10;

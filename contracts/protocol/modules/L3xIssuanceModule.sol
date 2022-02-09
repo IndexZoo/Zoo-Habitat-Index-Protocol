@@ -28,6 +28,8 @@ import { IController } from "../../interfaces/IController.sol";
 import { IUniswapV2Router } from "../../interfaces/external/IUniswapV2Router.sol";
 import { ILendingPool } from "../../interfaces/external/aave-v2/ILendingPool.sol";
 import { ILendingPoolAddressesProvider } from "../../interfaces/external/aave-v2/ILendingPoolAddressesProvider.sol";
+import { ILendingAdapter } from "../../interfaces/ILendingAdapter.sol";
+import { IExchangeAdapterV3 } from "../../interfaces/IExchangeAdapterV3.sol";
 import { IPriceOracleGetter } from "../../interfaces/external/aave-v2/IPriceOracleGetter.sol";
 import { Invoke } from "../lib/Invoke.sol";
 import { IZooToken } from "../../interfaces/IZooToken.sol";
@@ -61,7 +63,7 @@ import "hardhat/console.sol";
   * FIXME: Borrow only on behalf of users in order to determine the debt for each one properly
   * DONE: Redeem logic
   * TODO: Liquidation Threshold
-  * TODO: add 0.8 factor to configs
+  * TODO: TODO: add 0.8 factor to configs
   * TODO: Streaming fees 
   * TODO: Replace token component variable name by asset
   * DONE: Mint and set debt on zooToken
@@ -70,7 +72,7 @@ import "hardhat/console.sol";
   * TODO: Module viewer
   * TODO: Constructor: replace weth_ by underlying asset of LevToken (replacing SetToken)
   * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
-  * TODO: TODO: Integration Registry should be the provider of the calldata
+  * DONE: Integration Registry should be the provider of the calldata
   * DONE: _borrowQuoteForBaseCollateral: at the end ensure borrow took place smh
   * DONE: _swapQuoteForBase: at the end ensure swap took place
   * DONE: _borrowAvailableAmount: consider parameterizing the 0.999 factor
@@ -83,6 +85,17 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
 
     uint256 private constant BORROW_PORTION_FACTOR = 0.999 ether;
     uint256 private constant AMOUNT_PER_COLLATERAL = 0.8 ether;
+    uint256 private constant INTEGRATION_REGISTRY_RESOURCE_ID = 0;
+    string private constant AAVE_ADAPTER_NAME = "AAVE";
+
+    /* ==================== Struct ============================= */
+
+    struct LendingCallInfo {
+        IZooToken zooToken;                             // Instance of ZooToken
+        ILendingAdapter lendingAdapter;                 // Instance of exchange adapter contract
+        address asset;                                  // Address of token being borrowed 
+        uint256 amount;                                 // Amount of token to be borrowed
+    }
 
     struct ModuleConfig {
         ILendingPool lender;
@@ -211,7 +224,6 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         nonReentrant
         onlyValidAndInitializedSet(zooToken_)
     {
-        // TODO: TODO: Put debt Repay in private function
         IUniswapV2Router router_ = configs[address(zooToken_)].router;
         uint256 userZooBalance = zooToken_.balanceOf(msg.sender);
         if(quantity_  ==  uint256(-1)) {
@@ -250,17 +262,6 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     //     _borrowAvailableAmount(zooToken_);
     // }
 
-    function _finalizeRedeem (
-        IZooToken zooToken_,
-        uint256 quantity_,
-        uint256 debtRepaid_
-    ) 
-    private 
-    {
-        zooToken_.burn(msg.sender, quantity_);
-        zooToken_.transferAsset(weth, msg.sender, quantity_.sub(debtRepaid_));
-    }
-
 
     /**
      * Administrative calls: to be called by Manager only
@@ -279,9 +280,51 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
 
     function removeModule() external override {}
 
+    /* ============ Internal Functions ============ */
+
+    /**
+     * Create and return TradeInfo struct
+     *
+     * @param zooToken_             Instance of the ZooToken to trade
+     * @param lenderName_           Human readable name of the lender in the integrations registry
+     * @param asset_                Address of the underlying token to be borrowed 
+     * @param amount_               Amount of underlying token to be borrowed 
+     *
+     * return LendingCallInfo             Struct containing data for trade
+     */
+    function _createLendingCallInfo(
+        IZooToken zooToken_,
+        string memory lenderName_,
+        address asset_,
+        uint256 amount_
+    )
+        internal
+        view
+        returns (LendingCallInfo memory)
+    {
+        LendingCallInfo memory borrowInfo;
+        borrowInfo.zooToken = zooToken_;
+        borrowInfo.lendingAdapter = ILendingAdapter(getAndValidateAdapter(lenderName_));
+        borrowInfo.asset = asset_;
+        borrowInfo.amount = amount_;
+        return borrowInfo;
+    }
+
 
    /**  -------------------------------- Private functions --------------------------------------------------
     */
+
+    function _finalizeRedeem (
+        IZooToken zooToken_,
+        uint256 quantity_,
+        uint256 debtRepaid_
+    ) 
+    private 
+    {
+        zooToken_.burn(msg.sender, quantity_);
+        zooToken_.transferAsset(weth, msg.sender, quantity_.sub(debtRepaid_));
+    }
+
     function _withdrawUserPortionOfTotalCollateral(
         IZooToken zooToken_,
         uint256 quantity_
@@ -292,7 +335,13 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         uint256 zooSupply = zooToken_.totalSupply();
         (uint256 totalCollateralETH,,,,,) = configs[address(zooToken_)].lender.getUserAccountData(address(zooToken_));
         uint256 collateralPortion =  quantity_.mul(totalCollateralETH).div(zooSupply);
-        amountToWithdraw = _invokeWithdraw(zooToken_, address(weth), collateralPortion);
+        LendingCallInfo memory withdrawCallInfo = _createLendingCallInfo(
+            zooToken_, 
+            AAVE_ADAPTER_NAME, 
+            address(weth), 
+            collateralPortion 
+        );
+        amountToWithdraw = _invokeWithdraw(withdrawCallInfo);
     }
 
     function _payUserDebtPortion(
@@ -312,11 +361,6 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         
         uint256 debtToRepayInBaseCeil = quantity_.mul(userDebtInBase).div(userZooBalance); 
         debtToRepayInBaseCeil = debtToRepayInBaseCeil.mul(100).div(90);
-        // console.logUint(quantity_);
-        // console.logUint(userZooBalance);
-        // console.logUint(userDebtInQuote);
-        // console.logUint(debtToRepayInBaseCeil);
-        // console.logUint(weth.balanceOf(address(zooToken_)));
 
         require(debtToRepayInBaseCeil <= weth.balanceOf(address(zooToken_)) , "L3xIssuance: Not enough liquid");
         uint debtToRepayInQuote = quantity_.mul(userDebtInQuote).div(userZooBalance);
@@ -358,9 +402,21 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     {
         ILendingPool lender_ = configs[address(zooToken_)].lender;
         _invokeApprove(zooToken_, address(weth), address(lender_) , depositAmount_);
-        _invokeDeposit(zooToken_, address(weth), depositAmount_);
+
+        LendingCallInfo memory depositInfo = _createLendingCallInfo(
+            zooToken_, 
+            AAVE_ADAPTER_NAME, 
+            address(weth), 
+            depositAmount_
+        );
+        _invokeDeposit(depositInfo);
         // approve lender to receive swapped baseToken
-        (notionalBorrowAmount, ) = _borrowAvailableAmount(zooToken_, depositAmount_, AMOUNT_PER_COLLATERAL);
+        (notionalBorrowAmount, ) = _borrowAvailableAmount(
+            zooToken_, 
+            AAVE_ADAPTER_NAME, 
+            depositAmount_, 
+            AMOUNT_PER_COLLATERAL
+        );
         require(notionalBorrowAmount > 0, "L3xIssuanceModule: Borrowing unsuccessful");
     }
     function _swapQuoteForBase(
@@ -396,11 +452,18 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
 
         amounts = _invokeSwap(zooToken_, debtToRepayInQuote, debtToRepayInBaseCeil, Side.Bear);
         _invokeApprove(zooToken_, address(dai), address(lender_), amounts[1]);
-        _invokeRepay(zooToken_, address(dai), amounts[1]);
+        LendingCallInfo memory repayCallInfo = _createLendingCallInfo(
+            zooToken_, 
+            AAVE_ADAPTER_NAME, 
+            address(dai), 
+            amounts[1] 
+        );
+        _invokeRepay(repayCallInfo);
     }
 
     function _borrowAvailableAmount(
         IZooToken zooToken_,
+        string memory lenderName_,
         uint256 collateral,
         uint256 amountPerUnitCollateral
     )
@@ -418,7 +481,14 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
 
         // borrow 99.9% of what available (otherwise reverts)
         quoteAmountToBorrow = availableBorrowsETH.mul(BORROW_PORTION_FACTOR).div(quotePriceInETH);
-        _invokeBorrow(zooToken_, address(dai), quoteAmountToBorrow);
+        LendingCallInfo memory borrowInfo = _createLendingCallInfo(
+            zooToken_, 
+            lenderName_, 
+            address(dai), 
+            quoteAmountToBorrow 
+        );
+        _invokeBorrow(borrowInfo);
+        // _invokeBorrow(zooToken_, address(dai), quoteAmountToBorrow);
         baseAmountToBorrow = availableBorrowsETH.mul(BORROW_PORTION_FACTOR).div(1 ether);
     }
 
@@ -440,35 +510,38 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     private 
     returns (uint256[] memory amounts)
     {
-        IUniswapV2Router router_ = configs[address(zooToken_)].router;
         address[] memory path = new address[](2);
         path[0] = side == Side.Bull?  address(dai): address(weth); 
         path[1] = side == Side.Bull?  address(weth): address(dai);
-        string memory callString = side == Side.Bull? 
-          "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)":
-          "swapTokensForExactTokens(uint256,uint256,address[],address,uint256)";
         // TODO: Investigate might Change all to swapTokensForExactTokens
-        bytes memory callData = abi.encodeWithSignature(
-            callString,
-            amountExact_,
-            amountEdge_,
-            path,
-            address(zooToken_),
-            block.timestamp     
+
+        IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
+        (
+            address target,
+            uint256 callValue,
+            bytes memory methodData
+        ) = adapter.getTradeCalldata(
+            path[0], 
+            path[1], 
+            address(zooToken_), 
+            amountExact_, 
+            amountEdge_, 
+            side == Side.Bull,
+            ""
         );
-        bytes memory data = zooToken_.invoke(address(router_), 0, callData);
+        bytes memory data = zooToken_.invoke(target, callValue, methodData);
         amounts = abi.decode(data, (uint256[]));
     }
     /**
      * Instructs the SetToken to set approvals of the ERC20 token to a spender.
      *
-     * @param _setToken        SetToken instance to invoke
+     * @param _zooToken        SetToken instance to invoke
      * @param _token           ERC20 token to approve
      * @param _spender         The account allowed to spend the SetToken's balance
      * @param _quantity        The quantity of allowance to allow
      */
     function _invokeApprove(
-        IZooToken _setToken,
+        IZooToken _zooToken,
         address _token,
         address _spender,
         uint256 _quantity
@@ -476,85 +549,79 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
        private 
     {
         bytes memory callData = abi.encodeWithSignature("approve(address,uint256)", _spender, _quantity);
-        _setToken.invoke(_token, 0, callData);
+        _zooToken.invoke(_token, 0, callData);
     }
 
     function _invokeDeposit(
-        IZooToken zooToken_,
-        address asset,
-        uint256 amount 
+        LendingCallInfo memory depositInfo_
     )
        private 
     {
-
-        ILendingPool lender_ = configs[address(zooToken_)].lender;
-        bytes memory callData = abi.encodeWithSignature(
-            "deposit(address,uint256,address,uint16)", 
-            address(asset),  // asset to deposit
-            amount,  // amount
-            address(zooToken_), // onBehalfOf
-            0    // referralCode
+        (
+            address targetLendingPool,
+            uint256 callValue,
+            bytes memory methodData
+        ) = depositInfo_.lendingAdapter.getDepositCalldata(
+            depositInfo_.asset, 
+            depositInfo_.amount, 
+            address(depositInfo_.zooToken)
         );
-        zooToken_.invoke(address(lender_), 0, callData);
+        depositInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
     }
 
     function _invokeBorrow(
-        IZooToken zooToken_,
-        address asset,
-        uint256 amount 
+        LendingCallInfo memory borrowInfo_
     )
        private 
     {
-
-        ILendingPool lender_ = configs[address(zooToken_)].lender;
-        bytes memory callData = abi.encodeWithSignature(
-            "borrow(address,uint256,uint256,uint16,address)", 
-            address(asset),  // asset to deposit
-            amount,  // amount
-            1, // StableInterestMode
-            0,    // referralCode
-            address(zooToken_) // onBehalfOf
+        (
+            address targetLendingPool,
+            uint256 callValue,
+            bytes memory methodData
+        ) = borrowInfo_.lendingAdapter.getBorrowCalldata(
+            borrowInfo_.asset, 
+            borrowInfo_.amount, 
+            address(borrowInfo_.zooToken)
         );
-        zooToken_.invoke(address(lender_), 0, callData);
+        borrowInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
     }
 
     function _invokeWithdraw(
-        IZooToken zooToken_,
-        address asset,
-        uint256 amount 
+        LendingCallInfo memory withdrawCallInfo_
     )
        private 
        returns (uint256 amountToWithdraw)
     {
-
-        ILendingPool lender_ = configs[address(zooToken_)].lender;
-        bytes memory callData = abi.encodeWithSignature(
-            "withdraw(address,uint256,address)", 
-            address(asset),  // asset to deposit
-            amount,  // amount
-            address(zooToken_) // onBehalfOf
+        (
+            address targetLendingPool,
+            uint256 callValue,
+            bytes memory methodData
+        ) = withdrawCallInfo_.lendingAdapter.getWithdrawCalldata(
+            withdrawCallInfo_.asset, 
+            withdrawCallInfo_.amount, 
+            address(withdrawCallInfo_.zooToken)
         );
-        bytes memory data = zooToken_.invoke(address(lender_), 0, callData);
+
+        bytes memory data = withdrawCallInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
         amountToWithdraw = abi.decode(data, (uint256));
 
     }
 
     function _invokeRepay(
-        IZooToken zooToken_,
-        address asset,
-        uint256 amount 
+        LendingCallInfo memory repayCallInfo_
     )
        private 
     {
-
-        ILendingPool lender_ = configs[address(zooToken_)].lender;
-        bytes memory callData = abi.encodeWithSignature(
-            "repay(address,uint256,uint256,address)", 
-            address(asset),  // asset to deposit
-            amount,  // amount
-            1, // StableInterestMode
-            address(zooToken_) // onBehalfOf
+        (
+            address targetLendingPool,
+            uint256 callValue,
+            bytes memory methodData
+        ) = repayCallInfo_.lendingAdapter.getRepayCalldata(
+            repayCallInfo_.asset, 
+            repayCallInfo_.amount, 
+            address(repayCallInfo_.zooToken)
         );
-        zooToken_.invoke(address(lender_), 0, callData);
+
+        repayCallInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
     }
 }
