@@ -53,32 +53,7 @@ import "hardhat/console.sol";
  * NOTE: 
  */
 
- /**
-  * @dev Notes
-  * FIXME: Last withdrawal edge case, in which you need to do successive withdrawals and repay
-  *  - might require multiple step external call instead
-  * FIXME: Initialization of ecosystem: suppose 3 users issue tokes and price goes down on bull.
-  *  - Users won't be able even to redeem their funds even with loss ! FIX this 
-  *  - Depends on liquidation threshold discussion (risk assessment)
-  * FIXME: Borrow only on behalf of users in order to determine the debt for each one properly
-  * DONE: Redeem logic
-  * TODO: Liquidation Threshold
-  * TODO: TODO: add 0.8 factor to configs
-  * TODO: Streaming fees 
-  * TODO: Replace token component variable name by asset
-  * DONE: Mint and set debt on zooToken
-  * TODO: Rebalance price formula
-  * DONE: Access control on setting lender and router (each token should have their own config)
-  * TODO: Module viewer
-  * TODO: Constructor: replace weth_ by underlying asset of LevToken (replacing SetToken)
-  * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
-  * DONE: Integration Registry should be the provider of the calldata
-  * DONE: _borrowQuoteForBaseCollateral: at the end ensure borrow took place smh
-  * DONE: _swapQuoteForBase: at the end ensure swap took place
-  * DONE: _borrowAvailableAmount: consider parameterizing the 0.999 factor
 
-  *
-  */ 
 contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     using Position for IZooToken;
     using SafeMath for uint256;
@@ -240,27 +215,6 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         zooToken_.burn(msg.sender, quantity_);
         zooToken_.transferAsset(weth, msg.sender, currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]));
     }
-
-    /**
-     * Function aims at rebalancing deposits with debt to achieve the aimed leverage
-     * TODO: This function can be called by anyone if enabled by Manager
-     * -> if not enabled by manager then only allowed callers (also set by manager) can call this
-     * 
-     * @dev Rebalancing steps:
-     * * Show the amount available for borrow from lending protocol (Aave) 
-     *
-     *
-     * @param zooToken_         Zoo Token chosen to be rebalanced 
-     */
-    // function rebalanceIndex(
-    //     IZooToken zooToken_
-    // )
-    //     external
-    //     nonReentrant
-    //     onlyValidAndInitializedSet(zooToken_)
-    // {
-    //     _borrowAvailableAmount(zooToken_);
-    // }
 
 
     /**
@@ -513,7 +467,6 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         address[] memory path = new address[](2);
         path[0] = side == Side.Bull?  address(dai): address(weth); 
         path[1] = side == Side.Bull?  address(weth): address(dai);
-        // TODO: Investigate might Change all to swapTokensForExactTokens
 
         IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
         (

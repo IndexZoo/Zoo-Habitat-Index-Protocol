@@ -38,9 +38,7 @@ import { IWETH } from "@typechain/IWETH";
 import { AaveLendingAdapter } from "@typechain/AaveLendingAdapter";
 import { UniswapV2ExchangeAdapterV3 } from "@typechain/UniswapV2ExchangeAdapterV3";
 
-// TODO: Tests with prices change (losses, wins) (MORE)
-// TODO: deal with trick of depositing at different prices
-// TODO: Consider upgradeability test (changing factors in Module - maintaining state of token)
+
 
 const expect = getWaffleExpect();
 
