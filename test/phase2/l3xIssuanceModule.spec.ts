@@ -6,7 +6,7 @@ import { ADDRESS_ZERO, MAX_UINT_256, ZERO } from "@utils/constants";
 import { 
   IntegrationRegistry,
   StandardTokenMock,
-    UniswapV2Router02,
+    UniswapV2Router02 
 } from "@utils/contracts";
 import {
   getAccounts,
@@ -32,6 +32,7 @@ import { WETH9__factory } from "@typechain/factories/WETH9__factory";
 import { L3xIssuanceModule } from "@typechain/L3xIssuanceModule";
 import { ZooToken } from "@typechain/ZooToken";
 import { ZooTokenCreator } from "@typechain/ZooTokenCreator";
+import { ZooStreamingFeeModule } from "@typechain/ZooStreamingFeeModule";
 import { Controller } from "@typechain/Controller";
 import { UniswapV2Router02Mock } from "@typechain/UniswapV2Router02Mock";
 import { IWETH } from "@typechain/IWETH";
@@ -101,6 +102,7 @@ interface Contracts {
   zooToken: ZooToken;
   creator: ZooTokenCreator;
   integrator: IntegrationRegistry;
+  streamingFee: ZooStreamingFeeModule;
 }
 
 
@@ -122,7 +124,7 @@ class Context {
       const tx =  await this.ct.creator.create(
         [this.tokens.mockDai.address],
         [ether(1000)],
-        [this.subjectModule.address], 
+        [this.subjectModule.address, this.ct.streamingFee.address], 
         this.accounts.owner.address, 
         "eth long", 
         "BULL"
@@ -132,7 +134,18 @@ class Context {
       const tokensetAddress = event? event.args? event.args[0]:"":"";
       let deployedZooToken =  await ethers.getContractAt(ZooTokenABI, tokensetAddress);
       this.zoos.push(deployedZooToken as ZooToken);
+
+
       await this.subjectModule.initialize(deployedZooToken.address);
+      await this.ct.streamingFee.initialize(
+        deployedZooToken.address,
+        {
+          feeRecipient: this.accounts.protocolFeeRecipient.address,
+          maxStreamingFeePercentage: ether(0.05),  // 5%
+          streamingFeePercentage: ether(0.01),     // 1%
+          lastStreamingFeeTimestamp: ether(0)      // Timestamp is overriden 
+        }
+      );
   }
 
   public async redeemLoop(doRedeem: Function, account: Account, zToken: ZooToken  ): Promise<void> {
@@ -236,13 +249,17 @@ class Context {
         this.tokens.mockDai.address
       );
 
+      this.ct.streamingFee = await (await ethers.getContractFactory("StreamingFeeModule")).deploy(
+        this.ct.controller.address
+      );
+
       this.ct.integrator = await (await ethers.getContractFactory("IntegrationRegistry")).deploy(
         this.ct.controller.address
       );
 
       await this.ct.controller.initialize(
         [this.ct.creator.address],
-        [this.subjectModule.address],
+        [this.subjectModule.address, this.ct.streamingFee.address],
         [this.ct.integrator.address],
         [INTEGRATION_REGISTRY_RESOURCE_ID]
       );
@@ -941,6 +958,66 @@ describe("Controller", () => {
         expect(await ctx.subjectModule.getAddressesProvider(zToken.address)).to.be.equal(bob.address);
 
 
+      });
+    });
+
+    describe("StreamingFeeModule", async function () {
+      let feeRecipient: Account;
+      beforeEach("", async () => {
+        feeRecipient = ctx.accounts.protocolFeeRecipient; 
+        await ctx.issueZoos(zToken, ether(3000), ether(1000), bob);
+      });
+      it ("accrueFee() - fee is calculated as expected/increase totalSupply by correct amount", async () => {
+          let totalSupplyBeforeAccrue = await zToken.totalSupply();
+          let timeBeforeAccrue = (await ctx.ct.streamingFee.feeStates(zToken.address)).lastStreamingFeeTimestamp;
+          await ctx.ct.streamingFee.accrueFee(zToken.address);
+          let timeDeltaAccrue = (await ctx.ct.streamingFee.feeStates(zToken.address)).lastStreamingFeeTimestamp.sub(timeBeforeAccrue);
+
+          let feeConsumed =  (await zToken.totalSupply()).sub(  totalSupplyBeforeAccrue);
+          // Expecting fee ~ 3 / (365*60*60*24) * timeDelta * 0.01
+          let feeExpected = totalSupplyBeforeAccrue.mul(ether(0.01)).div(ether(1)).mul(timeDeltaAccrue).div(BigNumber.from(365*60*60*24));
+          expect(feeConsumed).to.be.approx(feeExpected);
+          // assert that fee gained by fee recipient is the increase in totalsupply
+          let feeRecipientBalance = await zToken.balanceOf(feeRecipient.address);
+          expect( feeRecipientBalance).to.eq(feeConsumed);
+      });
+      it ("accrueFee() - check fee calculation after time advance", async () => {
+          let totalSupplyBeforeAccrue = await zToken.totalSupply();
+          let feeRecipientBalance = await zToken.balanceOf(feeRecipient.address);
+          
+          //  Advance timestamp
+          await ethers.provider.send('evm_increaseTime', [3600]); // one hour
+          await ctx.ct.streamingFee.accrueFee(zToken.address);
+          totalSupplyBeforeAccrue = await zToken.totalSupply();
+          let feeRecipientBalanceLatest = await zToken.balanceOf(feeRecipient.address);
+          let feeExpected =  totalSupplyBeforeAccrue.mul(ether(0.01)).div(ether(1)).mul(3600).div(BigNumber.from(365*60*60*24));
+        
+          // check fee gained by feeRecipient
+          expect(feeRecipientBalanceLatest.sub(feeRecipientBalance)).to.approx(feeExpected)
+          
+      });
+      it ("updateStreamingFee() - update fee, this process mints fee for recipient with old value", async () => {
+          let totalSupplyBeforeAccrue = await zToken.totalSupply();
+          let feeRecipientBalance = await zToken.balanceOf(feeRecipient.address);
+          
+          //  Advance timestamp
+          await ethers.provider.send('evm_increaseTime', [3600]);  // one hour
+          await ctx.ct.streamingFee.updateStreamingFee(zToken.address, ether(0.02));
+          totalSupplyBeforeAccrue = await zToken.totalSupply();
+          let feeRecipientBalanceLatest = await zToken.balanceOf(feeRecipient.address);
+          let feeExpected =  totalSupplyBeforeAccrue.mul(ether(0.01)).div(ether(1)).mul(3600).div(BigNumber.from(365*60*60*24));
+        
+          // check fee gained by feeRecipient
+          expect(feeRecipientBalanceLatest.sub(feeRecipientBalance)).to.approx(feeExpected)
+          
+          await ethers.provider.send('evm_increaseTime', [3600]);
+          await ctx.ct.streamingFee.accrueFee(zToken.address);
+          let totalSupplyBeforeAccrue2 = await zToken.totalSupply();
+          let feeRecipientBalanceLatest2 = await zToken.balanceOf(feeRecipient.address);
+          let feeExpected2 =  totalSupplyBeforeAccrue2.mul(ether(0.02)).div(ether(1)).mul(3600).div(BigNumber.from(365*60*60*24));
+        
+          // check fee gained by feeRecipient
+          expect(feeRecipientBalanceLatest2.sub(feeRecipientBalanceLatest)).to.approx(feeExpected2)
       });
     });
 

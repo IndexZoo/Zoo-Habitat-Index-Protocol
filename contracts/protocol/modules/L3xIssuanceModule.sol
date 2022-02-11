@@ -34,6 +34,7 @@ import { IPriceOracleGetter } from "../../interfaces/external/aave-v2/IPriceOrac
 import { Invoke } from "../lib/Invoke.sol";
 import { IZooToken } from "../../interfaces/IZooToken.sol";
 import { IssuanceValidationUtils } from "../lib/IssuanceValidationUtils.sol";
+import { PreciseUnitMath } from "../../lib/PreciseUnitMath.sol";
 import { Position } from "../lib/Position.sol";
 import { ModuleBase } from "../lib/ZooModuleBase.sol";
 import "hardhat/console.sol";
@@ -61,10 +62,10 @@ import "hardhat/console.sol";
   *  - Depends on liquidation threshold discussion (risk assessment)
   * FIXME: Borrow only on behalf of users in order to determine the debt for each one properly
   * DONE: Redeem logic
-  * TODO: Liquidation Threshold
+  * TODO: Liquidation Threshold / Test position liquidation directly on Aave
   * TODO: Go bear
   * DONE: add 0.8 factor to configs
-  * TODO: Streaming fees 
+  * DONE: Streaming fees 
   * TODO: Replace token component variable name by asset
   * TODO: Constructor: replace weth_ by underlying asset of LevToken (replacing SetToken)
   * DONE: Mint and set debt on zooToken
@@ -258,9 +259,13 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         uint256[] memory amountsRepaid = _payUserDebtPortion(zooToken_, quantity_);
         // Withdraw 
         uint256 collateralPortion = _withdrawUserPortionOfTotalCollateral(zooToken_, quantity_);
+
+        uint256 redeemAmount = currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]);
+        uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
+        redeemAmount = redeemAmount.mul(positionMultiplier).div(uint256(PreciseUnitMath.preciseUnitInt()));
         
         zooToken_.burn(msg.sender, quantity_);
-        zooToken_.transferAsset(weth, msg.sender, currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]));
+        zooToken_.transferAsset(weth, msg.sender, redeemAmount);
     }
 
     /**

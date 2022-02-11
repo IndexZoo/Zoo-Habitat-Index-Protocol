@@ -344,7 +344,8 @@ contract ZooToken is ERC20 {
      * PRIVELEGED MODULE FUNCTION. Modifies the position multiplier. This is typically used to efficiently
      * update all the Positions' units at once in applications where inflation is awarded (e.g. subscription fees).
      */
-    function editPositionMultiplier(int256 _newMultiplier) external onlyModule whenLockedOnlyLocker {        
+    function editPositionMultiplier(int256 _newMultiplier) external onlyModule whenLockedOnlyLocker {
+        require(_newMultiplier > 0, "Cannot be set to negative value");        
         _validateNewMultiplier(_newMultiplier);
 
         positionMultiplier = _newMultiplier;
