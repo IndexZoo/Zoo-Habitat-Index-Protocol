@@ -52,6 +52,34 @@ import "hardhat/console.sol";
  * 
  * NOTE: 
  */
+ /**
+  * @dev Notes
+  * FIXME: Last withdrawal edge case, in which you need to do successive withdrawals and repay
+  *  - might require multiple step external call instead
+  * FIXME: Initialization of ecosystem: suppose 3 users issue tokes and price goes down on bull.
+  *  - Users won't be able even to redeem their funds even with loss ! FIX this 
+  *  - Depends on liquidation threshold discussion (risk assessment)
+  * FIXME: Borrow only on behalf of users in order to determine the debt for each one properly
+  * DONE: Redeem logic
+  * TODO: Liquidation Threshold
+  * TODO: Go bear
+  * DONE: add 0.8 factor to configs
+  * TODO: Streaming fees 
+  * TODO: Replace token component variable name by asset
+  * TODO: Constructor: replace weth_ by underlying asset of LevToken (replacing SetToken)
+  * DONE: Mint and set debt on zooToken
+  * TODO: Rebalance price formula
+  * DONE: Access control on setting lender and router (each token should have their own config)
+  * TODO: Module viewer
+  * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
+  * TODO: Investigate might Change all to swapTokensForExactTokens
+  * DONE: Integration Registry should be the provider of the calldata
+  * DONE: _borrowQuoteForBaseCollateral: at the end ensure borrow took place smh
+  * DONE: _swapQuoteForBase: at the end ensure swap took place
+  * DONE: _borrowAvailableAmount: consider parameterizing the 0.999 factor
+  *
+  */ 
+
 
 
 contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
@@ -59,7 +87,6 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     using SafeMath for uint256;
 
     uint256 private constant BORROW_PORTION_FACTOR = 0.999 ether;
-    uint256 private constant AMOUNT_PER_COLLATERAL = 0.8 ether;
     uint256 private constant INTEGRATION_REGISTRY_RESOURCE_ID = 0;
     string private constant AAVE_ADAPTER_NAME = "AAVE";
 
@@ -71,19 +98,39 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         address asset;                                  // Address of token being borrowed 
         uint256 amount;                                 // Amount of token to be borrowed
     }
-
-    struct ModuleConfig {
+    
+    /**
+     * Global configuration for module
+     */
+    struct GlobalConfig {
         ILendingPool lender;
         IUniswapV2Router router;
         ILendingPoolAddressesProvider addressesProvider;
+    }
+
+    struct LocalModuleConfig {
+        ILendingPool lender;
+        IUniswapV2Router router;
+        ILendingPoolAddressesProvider addressesProvider;
+        uint256 amountPerEthCollateral;                 // Amount to be borrowed for each unit of collateral in Eth
+
+    }
+    
+    /**
+     * Config dependent on token / unchangeable
+     */
+    struct TokenConfig {
+        Side side;                                      // Bull or Bear - this config is fixed (non changeable)
+        // TODO: BaseToken / QuoteToken
     }
 
     enum Side {
         Bull,
         Bear
     }
-
-    mapping(address => ModuleConfig) public configs;
+    
+    GlobalConfig public globalConfig;
+    mapping(address => LocalModuleConfig) public configs;
 
     IERC20 public weth; // 
     IERC20 public dai;
@@ -146,7 +193,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         IZooToken zooToken_,
         uint256 quantity_,
         uint256 basePriceInQuotes_,
-        uint256 swapFactorx1000_
+        uint256 swapFactorx1000_  // TODO: to be replaced by slippage
     )
         external
         nonReentrant
@@ -216,20 +263,39 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         zooToken_.transferAsset(weth, msg.sender, currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]));
     }
 
+    /**
+     * Administrative calls: to be called by Manager only
+     * // TODO: make it accessible by owner only
+     */
+     function setGlobalConfig(
+         address zooToken_,
+         GlobalConfig calldata config_
+    )
+    external
+    onlySetManager(IZooToken(zooToken_), msg.sender)
+    {
+        globalConfig.addressesProvider = config_.addressesProvider;
+        globalConfig.lender = config_.lender;
+        globalConfig.router = config_.router;
+    }
+
 
     /**
      * Administrative calls: to be called by Manager only
      */
      function setConfigForToken(
          address zooToken_,
-         ModuleConfig calldata config_
+         LocalModuleConfig calldata config_
     )
     external
     onlySetManager(IZooToken(zooToken_), msg.sender)
     {
+        uint256 amountPerEthCollateral = config_.amountPerEthCollateral;
+        require(amountPerEthCollateral > 0, "Zero amountPerCollateral unallowed");
         configs[zooToken_].addressesProvider = config_.addressesProvider;
         configs[zooToken_].lender = config_.lender;
         configs[zooToken_].router = config_.router;
+        configs[zooToken_].amountPerEthCollateral = amountPerEthCollateral;
     }
 
     function removeModule() external override {}
@@ -311,7 +377,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
         address[] memory path = new address[](2);
         path[0] = address(dai); 
         path[1] = address(weth);
-        uint256 userDebtInBase = configs[address(zooToken_)].router.getAmountsOut(userDebtInQuote, path)[1];
+        uint256 userDebtInBase =  getRouter(zooToken_).getAmountsOut(userDebtInQuote, path)[1];
         
         uint256 debtToRepayInBaseCeil = quantity_.mul(userDebtInBase).div(userZooBalance); 
         debtToRepayInBaseCeil = debtToRepayInBaseCeil.mul(100).div(90);
@@ -354,7 +420,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     private
     returns (uint256 notionalBorrowAmount)
     {
-        ILendingPool lender_ = configs[address(zooToken_)].lender;
+        ILendingPool lender_ = getLender(zooToken_);
         _invokeApprove(zooToken_, address(weth), address(lender_) , depositAmount_);
 
         LendingCallInfo memory depositInfo = _createLendingCallInfo(
@@ -369,7 +435,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
             zooToken_, 
             AAVE_ADAPTER_NAME, 
             depositAmount_, 
-            AMOUNT_PER_COLLATERAL
+            configs[address(zooToken_)].amountPerEthCollateral
         );
         require(notionalBorrowAmount > 0, "L3xIssuanceModule: Borrowing unsuccessful");
     }
@@ -381,7 +447,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
       private 
       returns (uint256 amountOut) 
     {
-        IUniswapV2Router router_ = configs[address(zooToken_)].router;
+        IUniswapV2Router router_ = getRouter(zooToken_);
         _invokeApprove(zooToken_, address(dai), address(router_), amountIn_);
         amountOut = _invokeSwap(zooToken_, amountIn_, minAmountOut_, Side.Bull)[1];
         require(amountOut != 0, "L3xIssueMod: Leveraging swapping failed");
@@ -398,8 +464,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     returns (uint256 [] memory amounts)
     {
 
-        IUniswapV2Router router_ = configs[address(zooToken_)].router;
-        ILendingPool lender_ = configs[address(zooToken_)].lender;
+        IUniswapV2Router router_ = getRouter(zooToken_); 
+        ILendingPool lender_ = getLender(zooToken_);
 
         _invokeApprove(zooToken_, address(weth), address(router_), debtToRepayInBaseCeil);
         // Swap max amount of debtToRepayInBase of baseToken for  exact debtToRepayInQuote amount for quoteToken
@@ -428,7 +494,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
     )
     {
 
-        address oracle = configs[address(zooToken_)].addressesProvider.getPriceOracle();
+        address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
         uint256 quotePriceInETH = IPriceOracleGetter(oracle).getAssetPrice(address(dai));
 
         uint256 availableBorrowsETH = collateral.mul(amountPerUnitCollateral).div(1 ether);
@@ -577,4 +643,26 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard {
 
         repayCallInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
     }
+
+    function getLender(IZooToken zooToken_) public view returns (ILendingPool ) 
+    {
+        ILendingPool local = configs[address(zooToken_)].lender;
+        return address(local) != address(0)?
+           local: globalConfig.lender; 
+    }
+
+    function getRouter(IZooToken zooToken_) public view returns (IUniswapV2Router ) 
+    {
+        IUniswapV2Router local = configs[address(zooToken_)].router;
+        return address(local) != address(0)?
+           local: globalConfig.router; 
+    }
+
+    function getAddressesProvider(IZooToken zooToken_) public view returns (ILendingPoolAddressesProvider ) 
+    {
+        ILendingPoolAddressesProvider local = configs[address(zooToken_)].addressesProvider;
+        return address(local) != address(0)?
+           local: globalConfig.addressesProvider; 
+    }
+
 }

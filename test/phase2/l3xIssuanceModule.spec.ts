@@ -38,6 +38,9 @@ import { IWETH } from "@typechain/IWETH";
 import { AaveLendingAdapter } from "@typechain/AaveLendingAdapter";
 import { UniswapV2ExchangeAdapterV3 } from "@typechain/UniswapV2ExchangeAdapterV3";
 
+// TODO: Tests with prices change (losses, wins) (MORE)
+// TODO: deal with trick of depositing at different prices
+// TODO: Consider upgradeability test (changing factors in Module - maintaining state of token)
 
 
 const expect = getWaffleExpect();
@@ -159,7 +162,8 @@ class Context {
       {
         lender: this.aaveFixture.lendingPool.address,
         router: this.router.address,
-        addressesProvider: this.aaveFixture.lendingPoolAddressesProvider.address
+        addressesProvider: this.aaveFixture.lendingPoolAddressesProvider.address,
+        amountPerEthCollateral: ether(0.8)
       }
     )
   }
@@ -182,7 +186,8 @@ class Context {
       {
         lender: this.aaveFixture.lendingPool.address,
         router: this.mockRouter.address,
-        addressesProvider: this.aaveFixture.lendingPoolAddressesProvider.address
+        addressesProvider: this.aaveFixture.lendingPoolAddressesProvider.address,
+        amountPerEthCollateral: ether(0.8)
       }
     )
   }
@@ -891,6 +896,50 @@ describe("Controller", () => {
 
     describe("Priveleges - ", async () =>  {
       it(" - verify only manager can call setConfigForToken()", async () => {
+        // TODO: 
+      });
+    });
+
+    describe("Testing view external functions and getters", async function () {
+      it("Accessibility of GlobalConfig and LocalConfig", async function() {
+        let config = {
+            lender: ADDRESS_ZERO,
+            router: ADDRESS_ZERO,
+            addressesProvider: ADDRESS_ZERO,
+            amountPerEthCollateral: ether(0.1)
+          };
+          let gConfig = {
+            lender: bob.address,
+            router: alice.address,
+            addressesProvider: oscar.address
+          };
+
+        await ctx.subjectModule.setConfigForToken(
+          zToken.address,
+          config
+        );
+        await ctx.subjectModule.setGlobalConfig(
+          zToken.address,
+          gConfig
+        );
+        expect(await ctx.subjectModule.getLender(zToken.address)).to.be.equal(bob.address);
+        expect(await ctx.subjectModule.getRouter(zToken.address)).to.be.equal(alice.address);
+        expect(await ctx.subjectModule.getAddressesProvider(zToken.address)).to.be.equal(oscar.address);
+
+        config = {
+            lender: alice.address,
+            router: oscar.address,
+            addressesProvider: bob.address,
+            amountPerEthCollateral: ether(0.1)
+        };
+        await ctx.subjectModule.setConfigForToken(
+          zToken.address,
+          config
+        );
+        expect(await ctx.subjectModule.getLender(zToken.address)).to.be.equal(alice.address);
+        expect(await ctx.subjectModule.getRouter(zToken.address)).to.be.equal(oscar.address);
+        expect(await ctx.subjectModule.getAddressesProvider(zToken.address)).to.be.equal(bob.address);
+
 
       });
     });
