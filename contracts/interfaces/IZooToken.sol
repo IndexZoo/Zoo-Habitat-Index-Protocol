@@ -36,6 +36,11 @@ interface IZooToken is IERC20 {
         INITIALIZED
     }
 
+    enum Side {
+        Bull,
+        Bear
+    }
+
     /* ============ Structs ============ */
     /**
      * The base definition of a SetToken Position
@@ -85,6 +90,11 @@ interface IZooToken is IERC20 {
       bytes data;
     }
 
+    struct Components {
+        address quote;
+        address base;
+    }
+
     /* ============ Functions ============ */
     
     function addComponent(address _component) external;
@@ -97,7 +107,7 @@ interface IZooToken is IERC20 {
 
     function invoke(address _target, uint256 _value, bytes calldata _data) external returns(bytes memory);
 
-    function editPositionMultiplier(int256 _newMultiplier) external;
+    function editPositionMultiplier(uint256 _newMultiplier) external;
 
     function addDebt(address _account, uint256 _quantity) external;
     function payDebt(address _account, uint256 _quantity) external;
@@ -129,6 +139,8 @@ interface IZooToken is IERC20 {
     
     function positionMultiplier() external view returns (int256);
     function getPositions() external view returns (Position[] memory);
+    function pair() external view returns (Components memory);
+    function side() external view returns (Side );
     function getTotalComponentRealUnits(address _component) external view returns(int256);
 
     function isInitializedModule(address _module) external view returns(bool);

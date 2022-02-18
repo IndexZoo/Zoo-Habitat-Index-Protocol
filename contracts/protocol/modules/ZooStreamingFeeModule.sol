@@ -276,8 +276,8 @@ contract ZooStreamingFeeModule is ModuleBase, ReentrancyGuard {
      * @param   _inflationFee           Fee inflation rate
      */
     function _editPositionMultiplier(IZooToken _setToken, uint256 _inflationFee) internal {
-        int256 currentMultipler = _setToken.positionMultiplier();
-        int256 newMultiplier = currentMultipler.preciseMul(PreciseUnitMath.preciseUnit().sub(_inflationFee).toInt256());
+        uint256 currentMultipler = uint256(_setToken.positionMultiplier());
+        uint256 newMultiplier = currentMultipler.preciseMul(PreciseUnitMath.preciseUnit().sub(_inflationFee));
 
         _setToken.editPositionMultiplier(newMultiplier);
     }

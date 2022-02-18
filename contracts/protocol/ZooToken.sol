@@ -62,6 +62,19 @@ contract ZooToken is ERC20 {
     uint8 internal constant DEFAULT = 0;
     uint8 internal constant EXTERNAL = 1;
 
+    /* =========== Structs ============ */
+    struct Components {
+        address quote;
+        address base;
+    }
+
+
+    /* =========== Enums ============ */
+    enum Side {
+        Bull,
+        Bear
+    }
+
     /* ============ Events ============ */
 
     event Invoked(address indexed _target, uint indexed _value, bytes _data, bytes _returnValue);
@@ -70,7 +83,7 @@ contract ZooToken is ERC20 {
     event ModuleInitialized(address indexed _module);
     event ManagerEdited(address _newManager, address _oldManager);
     event PendingModuleRemoved(address indexed _module);
-    event PositionMultiplierEdited(int256 _newMultiplier);
+    event PositionMultiplierEdited(uint256 _newMultiplier);
     event ComponentAdded(address indexed _component);
     event ComponentRemoved(address indexed _component);
     event DefaultPositionUnitEdited(address indexed _component, int256 _realUnit);
@@ -121,6 +134,10 @@ contract ZooToken is ERC20 {
     // List of initialized Modules; Modules extend the functionality of SetTokens
     address[] public modules;
 
+    Components public pair;
+
+    Side public side;
+
     // Modules are initialized from NONE -> PENDING -> INITIALIZED through the
     // addModule (called by manager) and initialize  (called by module) functions
     mapping(address => ISetToken.ModuleState) public moduleStates;
@@ -140,7 +157,7 @@ contract ZooToken is ERC20 {
 
     // The multiplier applied to the virtual position unit to achieve the real/actual unit.
     // This multiplier is used for efficiently modifying the entire position units (e.g. streaming fee)
-    int256 public positionMultiplier;
+    uint256 public positionMultiplier;
 
     /*============= Zoo Leverage =======================*/
     // The debts represents the amount being borrowed by issuer on Aave via the Token 
@@ -177,20 +194,21 @@ contract ZooToken is ERC20 {
         public
         ERC20(_name, _symbol)
     {
+        // TODO: TODO: refactor and add baseToken & quoteToken variables
         controller = _controller;
         manager = _manager;
-        positionMultiplier = PreciseUnitMath.preciseUnitInt();
-        components = _components;
+        positionMultiplier = PreciseUnitMath.preciseUnit();
 
         // Modules are put in PENDING state, as they need to be individually initialized by the Module
         for (uint256 i = 0; i < _modules.length; i++) {
             moduleStates[_modules[i]] = ISetToken.ModuleState.PENDING;
         }
 
-        // Positions are put in default state initially
-        for (uint256 j = 0; j < _components.length; j++) {
-            componentPositions[_components[j]].virtualUnit = _units[j];
-        }
+        pair.quote = _components[0];
+        pair.base = _components[1];
+
+        side = _units[0] > _units[1]? Side.Bull: Side.Bear;
+
     }
 
     /* ============ External Functions ============ */
@@ -344,9 +362,8 @@ contract ZooToken is ERC20 {
      * PRIVELEGED MODULE FUNCTION. Modifies the position multiplier. This is typically used to efficiently
      * update all the Positions' units at once in applications where inflation is awarded (e.g. subscription fees).
      */
-    function editPositionMultiplier(int256 _newMultiplier) external onlyModule whenLockedOnlyLocker {
+    function editPositionMultiplier(uint256 _newMultiplier) external onlyModule whenLockedOnlyLocker {
         require(_newMultiplier > 0, "Cannot be set to negative value");        
-        _validateNewMultiplier(_newMultiplier);
 
         positionMultiplier = _newMultiplier;
 
@@ -618,7 +635,7 @@ contract ZooToken is ERC20 {
      * be rounded away from 0 so no need to check that unit will be rounded down to 0 in conversion.
      */
     function _convertRealToVirtualUnit(int256 _realUnit) internal view returns(int256) {
-        int256 virtualUnit = _realUnit.conservativePreciseDiv(positionMultiplier);
+        int256 virtualUnit = _realUnit.conservativePreciseDiv(int256(positionMultiplier));
 
         // This check ensures that the virtual unit does not return a result that has rounded down to 0
         if (_realUnit > 0 && virtualUnit == 0) {
@@ -637,53 +654,7 @@ contract ZooToken is ERC20 {
      * Takes a virtual unit and multiplies by the position multiplier to return the real unit
      */
     function _convertVirtualToRealUnit(int256 _virtualUnit) internal view returns(int256) {
-        return _virtualUnit.conservativePreciseMul(positionMultiplier);
-    }
-
-    /**
-     * To prevent virtual to real unit conversion issues (where real unit may be 0), the 
-     * product of the positionMultiplier and the lowest absolute virtualUnit value (across default and
-     * external positions) must be greater than 0.
-     */
-    function _validateNewMultiplier(int256 _newMultiplier) internal view {
-        int256 minVirtualUnit = _getPositionsAbsMinimumVirtualUnit();
-
-        require(minVirtualUnit.conservativePreciseMul(_newMultiplier) > 0, "New multiplier too small");
-    }
-
-    /**
-     * Loops through all of the positions and returns the smallest absolute value of 
-     * the virtualUnit.
-     *
-     * @return Min virtual unit across positions denominated as int256
-     */
-    function _getPositionsAbsMinimumVirtualUnit() internal view returns(int256) {
-        // Additional assignment happens in the loop below
-        uint256 minimumUnit = uint256(-1);
-
-        for (uint256 i = 0; i < components.length; i++) {
-            address component = components[i];
-
-            // A default position exists if the default virtual unit is > 0
-            uint256 defaultUnit = _defaultPositionVirtualUnit(component).toUint256();
-            if (defaultUnit > 0 && defaultUnit < minimumUnit) {
-                minimumUnit = defaultUnit;
-            }
-
-            address[] memory externalModules = _externalPositionModules(component);
-            for (uint256 j = 0; j < externalModules.length; j++) {
-                address currentModule = externalModules[j];
-
-                uint256 virtualUnit = _absoluteValue(
-                    _externalPositionVirtualUnit(component, currentModule)
-                );
-                if (virtualUnit > 0 && virtualUnit < minimumUnit) {
-                    minimumUnit = virtualUnit;
-                }
-            }
-        }
-
-        return minimumUnit.toInt256();        
+        return _virtualUnit.conservativePreciseMul(int256(positionMultiplier));
     }
 
     /**

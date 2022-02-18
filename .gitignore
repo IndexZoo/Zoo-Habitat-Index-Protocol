@@ -17,6 +17,7 @@
 coverage.json
 coverage/
 .env
+tmp
 
 /.coverage_cache
 /.coverage_contracts

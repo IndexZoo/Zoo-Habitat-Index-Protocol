@@ -76,7 +76,7 @@ contract AaveLendingAdapter {
             BORROW, 
             _asset,  // asset to deposit
             _amount,  // amount
-            1, // StableInterestMode
+            2, // VariableInterestMode .. stable is not suited
             0,    // referralCode
             _onBehalfOf // onBehalfOf
         );
@@ -109,7 +109,7 @@ contract AaveLendingAdapter {
             REPAY, 
             _asset,  // asset to deposit
             _amount,  // amount
-            1, // StableInterestMode
+            2, // StableInterestMode
             _onBehalfOf // onBehalfOf
         );
         return (lender, 0, callData);
