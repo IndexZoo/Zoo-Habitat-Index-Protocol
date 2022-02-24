@@ -38,257 +38,23 @@ import { UniswapV2Router02Mock } from "@typechain/UniswapV2Router02Mock";
 import { IWETH } from "@typechain/IWETH";
 import { AaveLendingAdapter } from "@typechain/AaveLendingAdapter";
 import { UniswapV2ExchangeAdapterV3 } from "@typechain/UniswapV2ExchangeAdapterV3";
+import { L3xRebalanceModule } from "@typechain/L3xRebalanceModule";
+import {
+  Context,
+  AAVE_ADAPTER_NAME,
+  UNISWAP_ADAPTER_NAME,
+  pMul, 
+  initUniswapMockRouter, 
+  initUniswapRouter
+} from './context';
 
-// TODO: Tests with prices change (losses, wins) (MORE)
-// TODO: deal with trick of depositing at different prices
-// TODO: Consider upgradeability test (changing factors in Module - maintaining state of token)
+
 
 
 const expect = getWaffleExpect();
 
-const INTEGRATION_REGISTRY_RESOURCE_ID = 0;
-const INTEGRATION_REGISTRY_LEND_RESOURCE_ID  = 1;
-const AAVE_ADAPTER_NAME = "AAVE";
-const UNISWAP_ADAPTER_NAME = "UNISWAP";
 
-const initUniswapRouter = async (owner: Account, weth:  Contract, dai:  StandardTokenMock, btc: StandardTokenMock): Promise<UniswapV2Router02> => {
-      let router: UniswapV2Router02;
-
-         let uniswapFixture =  getUniswapFixture(owner.address);
-        await uniswapFixture.initialize(
-          owner,
-          weth.address,
-          btc.address,
-          dai.address
-        );
-        router = uniswapFixture.router;
-      await  weth.approve(router.address, MAX_UINT_256);
-      await dai.approve(router.address, MAX_UINT_256);
-      await router.addLiquidity(weth.address, dai.address, ether(4000), ether(4000000), ether(3990), ether(3900000), owner.address, MAX_UINT_256);
-      return router;
-}
-
-const initUniswapMockRouter = async(owner: Account, weth:  Contract, dai:  StandardTokenMock, btc: StandardTokenMock): Promise<UniswapV2Router02Mock> => {
-      let router: UniswapV2Router02Mock;
-      router = await (await ethers.getContractFactory("UniswapV2Router02Mock")).deploy();
-      await  weth.approve(router.address, MAX_UINT_256);
-      await dai.approve(router.address, MAX_UINT_256);
-
-      await router.addLiquidity(weth.address, dai.address, ether(500), ether(500000), ether(499), ether(499000), owner.address, MAX_UINT_256);
-    
-      return router;
-}
-
-
-interface Accounts {
-  owner: Account;
-  protocolFeeRecipient: Account;
-  mockUser: Account;
-  mockSubjectModule: Account;
-  bob: Account;
-  alice: Account;
-  oscar: Account;
-  others: Account[];
-}
-
-interface Tokens {
-  weth: Contract;
-  mockDai: StandardTokenMock;
-  mockBtc: StandardTokenMock;
-}
-
-interface Contracts {
-  controller: Controller;
-  zooToken: ZooToken;
-  creator: ZooTokenCreator;
-  integrator: IntegrationRegistry;
-  streamingFee: ZooStreamingFeeModule;
-}
-
-
-class Context {
-  public accounts= <Accounts>{};
-  public tokens = <Tokens> {};
-  public ct = <Contracts> {};
-  public zoos: ZooToken[] = [];
-
-  public aaveFixture: AaveV2Fixture;
-  public subjectModule: L3xIssuanceModule;
-  public router: UniswapV2Router02;
-  public mockRouter: UniswapV2Router02Mock;
-
-  /**
-   * @dev creates Zoo Leverage Token via a contract factory
-   */
-  public async createZooToken(sideIsBull: boolean = true): Promise<void> {
-      const tx =  await this.ct.creator.create(
-        [this.tokens.mockDai.address, this.tokens.weth.address],
-        sideIsBull? [ether(2), ether(1)]: [ether(1), ether(2)],
-        [this.subjectModule.address, this.ct.streamingFee.address], 
-        this.accounts.owner.address, 
-        "eth long", 
-        "BULL"
-      );
-      const receipt = await tx.wait();
-      const event = receipt.events?.find(p => p.event == "ZooTokenCreated");
-      const tokensetAddress = event? event.args? event.args[0]:"":"";
-      let deployedZooToken =  await ethers.getContractAt(ZooTokenABI, tokensetAddress);
-      this.zoos.push(deployedZooToken as ZooToken);
-
-
-      await this.subjectModule.initialize(deployedZooToken.address);
-      await this.ct.streamingFee.initialize(
-        deployedZooToken.address,
-        {
-          feeRecipient: this.accounts.protocolFeeRecipient.address,
-          maxStreamingFeePercentage: ether(0.05),  // 5%
-          streamingFeePercentage: ether(0.01),     // 1%
-          lastStreamingFeeTimestamp: ether(0)      // Timestamp is overriden 
-        }
-      );
-  }
-
-  public async redeemLoop(doRedeem: Function, account: Account, zToken: ZooToken  ): Promise<void> {
-        let accountZooBalance:BigNumber;
-        let wethZooBalance:BigNumber;
-        let redeemAmount: BigNumber;
-        let c = 0; // general safety to break loops
-        do{
-          if(c++ > 10) break;
-          accountZooBalance = await zToken.balanceOf(account.address);
-          wethZooBalance = await this.tokens.weth.balanceOf(zToken.address);
-          redeemAmount = accountZooBalance > wethZooBalance.mul(90).div(100)? 
-             wethZooBalance.mul(90).div(100): MAX_UINT_256;
-          await doRedeem(account, redeemAmount);
-        } while(redeemAmount !== MAX_UINT_256)
-  }
-
-  public async issueZoos(zoo: ZooToken, amount: BigNumber, price: BigNumber, to: Account): Promise<void> {
-       await this.tokens.mockDai.mint(to.address, amount);
-       await this.tokens.mockDai.connect(to.wallet).approve(this.subjectModule.address, amount);
-       await this.subjectModule.connect(to.wallet).issue(zoo.address, amount, price,  985);
-  }
-
-  public async configureZoo(zoo: ZooToken, amountPerUnitCollateral: BigNumber): Promise<void> {
-    await this.subjectModule.setConfigForToken(
-      zoo.address, 
-      {
-        lender: this.aaveFixture.lendingPool.address,
-        router: this.router.address,
-        addressesProvider: this.aaveFixture.lendingPoolAddressesProvider.address,
-        amountPerUnitCollateral
-      }
-    )
-  }
-
-  public async configZooWithMockRouter(
-    zoo: ZooToken, 
-    amountPerUnitCollateral: BigNumber = ether(0.8)
-  ): Promise<void> {
-    await this.ct.integrator.removeIntegration(
-      this.subjectModule.address, 
-      UNISWAP_ADAPTER_NAME
-    );
-      let mockUniswapProtocolAdapter = await (await ethers.getContractFactory("UniswapV2ExchangeAdapterV3")).deploy(
-        this.mockRouter.address 
-      );
-    await this.ct.integrator.addIntegration(
-      this.subjectModule.address,
-      UNISWAP_ADAPTER_NAME,
-      mockUniswapProtocolAdapter.address
-    )
-    await this.subjectModule.setConfigForToken(
-      zoo.address, 
-      {
-        lender: this.aaveFixture.lendingPool.address,
-        router: this.mockRouter.address,
-        addressesProvider: this.aaveFixture.lendingPoolAddressesProvider.address,
-        amountPerUnitCollateral
-      }
-    )
-  }
-
-  public async initialize() : Promise<void>  {
-    [
-      this.accounts.owner,
-      this.accounts.protocolFeeRecipient,
-      this.accounts.mockUser,
-      this.accounts.mockSubjectModule,
-      this.accounts.bob,
-      this.accounts.alice,
-      this.accounts.oscar,
-      ...this.accounts.others
-    ] = await getAccounts();
-     
-      /* ================================================== DeFi Fixtures ==================================================*/
-      this.aaveFixture = getAaveV2Fixture(this.accounts.owner.address);
-      this.tokens.mockDai =  await (await ethers.getContractFactory("StandardTokenMock")).deploy(this.accounts.owner.address, ether(100000000), "MockDai", "MDAI", 18);
-      this.tokens.mockBtc = await (await ethers.getContractFactory("StandardTokenMock")).deploy(this.accounts.owner.address, bitcoin(1000000), "MockBtc", "MBTC", 8);
-      this.tokens.weth = await new WETH9__factory(this.accounts.owner.wallet).deploy();
-
-      // await this.tokens.weth.connect(this.accounts.bob.wallet).deposit({value: ether(500)});
-      await this.tokens.weth.deposit({value: ether(5000)});
-      // await this.tokens.mockDai.transfer(this.accounts.bob.address, ether(200000));
-      
-      this.router = await initUniswapRouter(this.accounts.owner, this.tokens.weth, this.tokens.mockDai, this.tokens.mockBtc);      
-      this.mockRouter = await initUniswapMockRouter(this.accounts.owner, this.tokens.weth, this.tokens.mockDai, this.tokens.mockBtc);      
-
-      await  this.aaveFixture.initialize(this.tokens.weth.address, this.tokens.mockDai.address);
-
-      // provide liquidity
-      await this.tokens.mockDai.connect(this.accounts.owner.wallet).approve(this.aaveFixture.lendingPool.address, MAX_UINT_256);
-      await this.tokens.weth.connect(this.accounts.owner.wallet).approve(this.aaveFixture.lendingPool.address, MAX_UINT_256);
-      await this.aaveFixture.lendingPool.connect(this.accounts.owner.wallet).deposit(this.tokens.mockDai.address, ether(1000000), this.accounts.owner.address, ZERO);
-      await this.aaveFixture.lendingPool.connect(this.accounts.owner.wallet).deposit(this.tokens.weth.address, ether(50), this.accounts.owner.address, ZERO);
-
-      /* ============================================= Zoo Ecosystem ==============================================================*/
-      this.ct.controller =  await (await ethers.getContractFactory("Controller")).deploy(
-        this.accounts.protocolFeeRecipient.address
-      );
-      this.ct.creator =  await (await ethers.getContractFactory("ZooTokenCreator")).deploy(
-        this.ct.controller.address
-      );
-      this.subjectModule = await (await ethers.getContractFactory("L3xIssuanceModule")).deploy(
-        this.ct.controller.address
-      );
-
-      this.ct.streamingFee = await (await ethers.getContractFactory("ZooStreamingFeeModule")).deploy(
-        this.ct.controller.address
-      );
-
-      this.ct.integrator = await (await ethers.getContractFactory("IntegrationRegistry")).deploy(
-        this.ct.controller.address
-      );
-
-      await this.ct.controller.initialize(
-        [this.ct.creator.address],
-        [this.subjectModule.address, this.ct.streamingFee.address],
-        [this.ct.integrator.address],
-        [INTEGRATION_REGISTRY_RESOURCE_ID]
-      );
-
-      let lendingProtocolAdapter = await (await ethers.getContractFactory("AaveLendingAdapter")).deploy(
-        this.aaveFixture.lendingPool.address
-      );
-      let uniswapProtocolAdapter = await (await ethers.getContractFactory("UniswapV2ExchangeAdapterV3")).deploy(
-        this.router.address 
-      );
-      await this.ct.integrator.addIntegration(
-        this.subjectModule.address,
-        AAVE_ADAPTER_NAME,
-        lendingProtocolAdapter.address
-      );
-      await this.ct.integrator.addIntegration(
-        this.subjectModule.address,
-        UNISWAP_ADAPTER_NAME,
-        uniswapProtocolAdapter.address
-      );
-      await this.createZooToken();
-      await this.createZooToken(false);
-  }
-}
-
-describe("Controller", () => {
+describe("IssuanceModule", () => {
   let ctx: Context;
   let zToken: ZooToken;
   let bearToken: ZooToken;
@@ -301,7 +67,6 @@ describe("Controller", () => {
 
   });
 
-  describe("Owner needs to deposit and withdraw collateral inside Aave", async function () {
     beforeEach(async () => {
       ctx = new Context();
       await ctx.initialize();
@@ -314,6 +79,7 @@ describe("Controller", () => {
       mockSubjectModule = ctx.accounts.mockSubjectModule;
 
       await ctx.configureZoo(zToken, ether(0.8));
+
       await ctx.configureZoo(bearToken, ether(0.75));
     });
     describe("Ecosystem checks", async () => {
@@ -1166,8 +932,6 @@ describe("Controller", () => {
         expect(await ctx.subjectModule.getLender(zToken.address)).to.be.equal(alice.address);
         expect(await ctx.subjectModule.getRouter(zToken.address)).to.be.equal(oscar.address);
         expect(await ctx.subjectModule.getAddressesProvider(zToken.address)).to.be.equal(bob.address);
-
-
       });
     });
 
@@ -1177,7 +941,7 @@ describe("Controller", () => {
         feeRecipient = ctx.accounts.protocolFeeRecipient; 
         await ctx.issueZoos(zToken, ether(3000), ether(1000), bob);
       });
-      // TODO: scenario with issuing after acruing fee
+      // TODO: scenario with issuing after acruing fee - this to test inflation
       it ("accrueFee() - fee is calculated as expected/increase totalSupply by correct amount", async () => {
           let totalSupplyBeforeAccrue = await zToken.totalSupply();
           let timeBeforeAccrue = (await ctx.ct.streamingFee.feeStates(zToken.address)).lastStreamingFeeTimestamp;
@@ -1249,5 +1013,4 @@ describe("Controller", () => {
        console.log(userData.availableBorrowsETH.toString());
        
     });
-  });
 });

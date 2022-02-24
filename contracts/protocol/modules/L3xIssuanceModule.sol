@@ -37,6 +37,7 @@ import { IssuanceValidationUtils } from "../lib/IssuanceValidationUtils.sol";
 import { PreciseUnitMath } from "../../lib/PreciseUnitMath.sol";
 import { Position } from "../lib/Position.sol";
 import { ModuleBase } from "../lib/ZooModuleBase.sol";
+import { L3xUtils } from "../lib/L3xUtils.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import "hardhat/console.sol";
 
@@ -71,21 +72,10 @@ import "hardhat/console.sol";
   * Position Multiplier decreases (i.e. inflation increases) when Manager accrues streaming fees
   * Zoo is bear when BaseToken becomes the borrow asset and QuoteToken (stable coin) becomes the deposit asset
   * Zoo is bull when BaseToken becomes the deposit asset and QuoteToken becomes the borrow asset
+  *
+  * Rebalancing is carried out in separate module
   
-  * FIXME: Last withdrawal edge case, in which you need to do successive withdrawals and repay
-  *  - might require multiple step external call instead
-  * FIXME: Initialization of ecosystem: suppose 3 users issue tokes and price goes down on bull.
-  *  - Users won't be able even to redeem their funds even with loss ! FIX this 
-  *  - Depends on liquidation threshold discussion (risk assessment)
-  * FIXME: Borrow only on behalf of users in order to determine the debt for each one properly
-  * FIXME: relook positionMultiplier , do it on issue and redeem
-  * TODO: beforeTokenTransfer
-  * TODO: Liquidation Threshold / Test position liquidation directly on Aave
-  * TODO: reassure inflationFee always less than 1 ether
-  * TODO: Replace token component variable name by asset
-  * TODO: TODO: Rebalance price formula
-  * TODO: Module viewer
-  * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
+
   *
   */ 
 
@@ -93,31 +83,20 @@ import "hardhat/console.sol";
 
 contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     using Position for IZooToken;
+    using L3xUtils for IZooToken;
     using SafeMath for uint256;
+    using PreciseUnitMath for uint256;
+    using L3xUtils for L3xUtils.LendingCallInfo;
 
     /* =================== Enums ==============================*/
  
-    enum PPath {
-        Ether,
-        BorrowToken,
-        DepositToken
-    } 
-
-
     enum Side {
         Bull,
         Bear
     }
 
     /* ==================== Struct ============================= */
-
-    struct LendingCallInfo {
-        IZooToken zooToken;                             // Instance of ZooToken
-        ILendingAdapter lendingAdapter;                 // Instance of exchange adapter contract
-        address asset;                                  // Address of token being borrowed 
-        uint256 amount;                                 // Amount of token to be borrowed
-    }
-    
+   
     /**
      * Global configuration for module
      */
@@ -140,13 +119,47 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      */
     struct TokenConfig {
         Side side;                                      // Bull or Bear - this config is fixed (non changeable)
-        // TODO: BaseToken / QuoteToken
     }
+
+    /* ============ Events ============ */
+    
+    event Issued(
+        IZooToken indexed _zooToken,
+        address indexed _holder,
+        address indexed _assetSent,
+        uint256 _amount,
+        uint256 _balance,
+        uint256 _debt
+    );
+
+    event Redeemed(
+        IZooToken indexed _zooToken,
+        address indexed _holder,
+        address indexed _assetReceived,
+        uint256 _amount,
+        uint256 _balance,
+        uint256 _debt
+    );
+
+    event ConfigSetForToken(
+        IZooToken indexed _zooToken,
+        LocalModuleConfig _config
+    );
+
+    event ConfigSetForGlobal(
+        GlobalConfig _config
+    );
+
+
+    /* ==================== Constants ================================ */
 
     uint256 private constant BORROW_PORTION_FACTOR = 0.999 ether;
     uint256 private constant INTEGRATION_REGISTRY_RESOURCE_ID = 0;
     string private constant AAVE_ADAPTER_NAME = "AAVE";
+    uint256 private constant STD_SCALER = 1 ether;
    
+    /* ==================== State Variables ========================== */
+
     GlobalConfig public globalConfig;
     mapping(address => LocalModuleConfig) public configs;
 
@@ -207,9 +220,10 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         uint256 borrowAmount;
         uint256 totalAmount = depositAmount;
         uint256 totalBorrowAmount;
+        IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
         for (uint8 i = 0; i < 2; i++) {
             borrowAmount = _borrowAgainstCollateral(zooToken_, depositAmount );
-            depositAmount = _swapQuoteAndBase(zooToken_, borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, price_));
+            depositAmount = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, price_));
 
             totalAmount = totalAmount.add(depositAmount);
             totalBorrowAmount = totalBorrowAmount.add(borrowAmount);
@@ -219,6 +233,15 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         zooToken_.addDebt(msg.sender, totalBorrowAmount);
         zooToken_.mint(msg.sender, totalAmount);
         require(totalAmount != 0, "L3xIssueMod: Leveraging failed");
+
+        emit  Issued(
+            zooToken_, 
+            msg.sender, 
+            zooToken_.pair().quote, 
+            quantity_, 
+            zooToken_.balanceOf(msg.sender), 
+            zooToken_.getDebt(msg.sender)
+        );
     }
 
     /**
@@ -253,8 +276,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         }
         require(quantity_ <= userZooBalance, "L3xIssuance: Not enough NAV" );
 
-        // Deposit Token (e.g. WETH)
-        address dToken = _zooIsBull(zooToken_)? zooToken_.pair().base : zooToken_.pair().quote;
+        // Deposit Asset (e.g. WETH)
+        address dAsset = zooToken_.zooIsBull()? zooToken_.pair().base : zooToken_.pair().quote;
 
         //@dev NB: Important to calculate currentBalancePortion before withdrawing collateralPortion and debtRepay
         uint256 currentBalancePortion = _getUserPortionOfCollateralBalance(zooToken_, quantity_);
@@ -262,12 +285,19 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         // Withdraw 
         uint256 collateralPortion = _withdrawUserPortionOfTotalCollateral(zooToken_, quantity_);
 
-        uint256 redeemAmount = currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]);
+        uint256 redeems = currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]);
         uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
-        redeemAmount = redeemAmount.mul(positionMultiplier).div(uint256(PreciseUnitMath.preciseUnitInt()));
-        
-        zooToken_.burn(msg.sender, quantity_);
-        zooToken_.transferAsset(IERC20(dToken), msg.sender, redeemAmount);
+        redeems = redeems.mul(positionMultiplier).div(uint256(PreciseUnitMath.preciseUnitInt()));
+        _finalizeRedeem(zooToken_, quantity_, redeems, dAsset);
+
+        emit  Redeemed(
+            zooToken_, 
+            msg.sender, 
+            dAsset, 
+            redeems, 
+            zooToken_.balanceOf(msg.sender), 
+            zooToken_.getDebt(msg.sender)
+        );
     }
 
     /**
@@ -283,6 +313,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         globalConfig.addressesProvider = config_.addressesProvider;
         globalConfig.lender = config_.lender;
         globalConfig.router = config_.router;
+
+        emit ConfigSetForGlobal(config_);
     }
 
 
@@ -305,6 +337,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         configs[zooToken_].lender = config_.lender;
         configs[zooToken_].router = config_.router;
         configs[zooToken_].amountPerUnitCollateral = amountPerUnitCollateral;
+
+        emit ConfigSetForToken(IZooToken(zooToken_), config_);
     }
 
     function removeModule() external override {}
@@ -352,9 +386,9 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     )
         internal
         view
-        returns (LendingCallInfo memory)
+        returns (L3xUtils.LendingCallInfo memory)
     {
-        LendingCallInfo memory borrowInfo;
+        L3xUtils.LendingCallInfo memory borrowInfo;
         borrowInfo.zooToken = zooToken_;
         borrowInfo.lendingAdapter = ILendingAdapter(getAndValidateAdapter(lenderName_));
         borrowInfo.asset = asset_;
@@ -368,32 +402,33 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     function _prepareAmountInForIssue(
         IZooToken zooToken_,
         uint256 depositAmountInStableC_,
-        uint256 depositTokenPrice_,
+        uint256 depositAssetPrice_,
         uint256 swapFactorx1000_
     )
     private
     returns (uint256 amountOut) 
     {
         IERC20(zooToken_.pair().quote).transferFrom(msg.sender, address(zooToken_), depositAmountInStableC_);
-        if(_zooIsBull(zooToken_)){
-           amountOut = _swapQuoteAndBase(zooToken_, depositAmountInStableC_, _multiplyByFactorSwap(depositAmountInStableC_, swapFactorx1000_, depositTokenPrice_)); 
+        if(zooToken_.zooIsBull()){
+           IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
+           amountOut = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), depositAmountInStableC_, _multiplyByFactorSwap(depositAmountInStableC_, swapFactorx1000_, depositAssetPrice_)); 
         }
         else {
             amountOut = depositAmountInStableC_;
         }
     }
 
-    // FIXME:
-    // function _finalizeRedeem (
-    //     IZooToken zooToken_,
-    //     uint256 quantity_,
-    //     uint256 debtRepaid_
-    // ) 
-    // private 
-    // {
-    //     zooToken_.burn(msg.sender, quantity_);
-    //     zooToken_.transferAsset(weth, msg.sender, quantity_.sub(debtRepaid_));
-    // }
+    function _finalizeRedeem (
+        IZooToken zooToken_,
+        uint256 quantity_,
+        uint256 redeems_,
+        address dAsset_
+    ) 
+    private 
+    {
+        zooToken_.burn(msg.sender, quantity_);
+        zooToken_.transferAsset(IERC20(dAsset_), msg.sender, redeems_);
+    }
 
     /**
      * Withdraw a portion of the collateral of zoo token in lender (e.g. Aave) 
@@ -409,22 +444,23 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     private
     returns(uint256 amountToWithdraw) 
     {
-        address dToken = _zooIsBull(zooToken_) ? zooToken_.pair().base : zooToken_.pair().quote;   // Deposit Token
+        address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base : zooToken_.pair().quote;   // Deposit Token
         uint256 zooSupply = zooToken_.totalSupply();
         (uint256 totalCollateralETH,,,,,) = configs[address(zooToken_)].lender.getUserAccountData(address(zooToken_));
         uint256 collateralPortion =  quantity_.mul(totalCollateralETH).div(zooSupply);
+        address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
 
         // getting price of borrowToken against depositToken 
-        collateralPortion = _getEquivalentAmountViaOraclePrice(
-            zooToken_, 
+        collateralPortion = zooToken_.getEquivalentAmountViaOraclePrice(
+            oracle, 
             collateralPortion,
-            [PPath.Ether, PPath.DepositToken]
+            [L3xUtils.PPath.Ether, L3xUtils.PPath.DepositAsset]
         );
         // convert amount 
-        LendingCallInfo memory withdrawCallInfo = _createLendingCallInfo(
+        L3xUtils.LendingCallInfo memory withdrawCallInfo = _createLendingCallInfo(
             zooToken_, 
             AAVE_ADAPTER_NAME, 
-            dToken,
+            dAsset,
             collateralPortion 
         );
         amountToWithdraw = _invokeWithdraw(withdrawCallInfo);
@@ -438,23 +474,23 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     returns (uint256[] memory amountsRepaid)
     {
         uint256 userZooBalance = zooToken_.balanceOf(msg.sender);
-        uint256 userDebtInBorrowToken = zooToken_.getDebt(msg.sender);
+        uint256 userDebtInBorrowAsset = zooToken_.getDebt(msg.sender);
         
         address[] memory path = new address[](2);
-        path[0] = _zooIsBull(zooToken_) ? zooToken_.pair().quote : zooToken_.pair().base; 
-        path[1] = _zooIsBull(zooToken_) ? zooToken_.pair().base : zooToken_.pair().quote; 
-        uint256 userDebtInDepositToken =  getRouter(zooToken_).getAmountsOut(userDebtInBorrowToken, path)[1];
+        path[0] = zooToken_.zooIsBull() ? zooToken_.pair().quote : zooToken_.pair().base; 
+        path[1] = zooToken_.zooIsBull() ? zooToken_.pair().base : zooToken_.pair().quote; 
+        uint256 userDebtInDepositAsset =  getRouter(zooToken_).getAmountsOut(userDebtInBorrowAsset, path)[1];
         
-        uint256 debtToRepayInDepositTokenCeil = quantity_.mul(userDebtInDepositToken).div(userZooBalance); 
-        debtToRepayInDepositTokenCeil = debtToRepayInDepositTokenCeil.mul(100).div(90);
+        uint256 debtToRepayInDepositAssetCeil = quantity_.mul(userDebtInDepositAsset).div(userZooBalance); 
+        debtToRepayInDepositAssetCeil = debtToRepayInDepositAssetCeil.mul(100).div(90);
         
         // The amount of DepositToken currently held by ZooToken 
-        uint256 runningBalanceOfDepositToken = IERC20(path[1]).balanceOf(address(zooToken_));
+        uint256 runningBalanceOfDepositAsset = IERC20(path[1]).balanceOf(address(zooToken_));
 
-        require(debtToRepayInDepositTokenCeil <=  runningBalanceOfDepositToken, "L3xIssuance: Not enough liquid");
-        uint debtToRepay = quantity_.mul(userDebtInBorrowToken).div(userZooBalance);
+        require(debtToRepayInDepositAssetCeil <=  runningBalanceOfDepositAsset, "L3xIssuance: Not enough liquid");
+        uint debtToRepay = quantity_.mul(userDebtInBorrowAsset).div(userZooBalance);
 
-        amountsRepaid = _repayDebtForUser(zooToken_, debtToRepayInDepositTokenCeil, debtToRepay);
+        amountsRepaid = _repayDebtForUser(zooToken_, debtToRepayInDepositAssetCeil, debtToRepay);
         // amountRepaid should be equal debtToRepay
         // TODO: Is it necessay to make sure amountsRepaid == debtToRepay or else revert ?
         zooToken_.payDebt(msg.sender, amountsRepaid[1]);  
@@ -473,10 +509,10 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     returns(uint256 currentBalancePortion) 
     {
         // Deposit Token
-        address dToken = _zooIsBull(zooToken_) ? zooToken_.pair().base:zooToken_.pair().quote;
+        address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base:zooToken_.pair().quote;
         uint256 zooSupply = zooToken_.totalSupply();
 
-        currentBalancePortion = quantity_.mul(IERC20(dToken).balanceOf(address(zooToken_))).div(zooSupply);
+        currentBalancePortion = quantity_.mul(IERC20(dAsset).balanceOf(address(zooToken_))).div(zooSupply);
     }
 
     function _multiplyByFactorSwap(
@@ -488,48 +524,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     pure
     returns (uint256)
     {
-        return amount_.mul(factorx1000_).div(1000).mul(1 ether).div(price_);
-    }
-
-    /**
-     * Get equivalent amount in value of token w.r.t the other token based on oracle price provided by Aave.
-     */
-    function _getEquivalentAmountViaOraclePrice(
-        IZooToken zooToken_,
-        uint256 amount,
-        PPath[2] memory path
-    )
-    private
-    view
-    returns (uint256 equivalentAmount)
-    {
-        address bToken = _zooIsBull(zooToken_) ? zooToken_.pair().quote : zooToken_.pair().base;   // borrow Token
-        address dToken = _zooIsBull(zooToken_) ? zooToken_.pair().base : zooToken_.pair().quote;   // Deposit Token
-        address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
-
-        // getting price of borrowToken against depositToken
-        uint256 bTokenPriceInETH = IPriceOracleGetter(oracle).getAssetPrice(bToken); 
-        uint256 dTokenPriceInETH = IPriceOracleGetter(oracle).getAssetPrice(dToken);
-        uint256[3] memory options = [1 ether, dTokenPriceInETH, bTokenPriceInETH];
-
-        // borrow 99.9% of what available (otherwise reverts)
-        equivalentAmount = amount.mul(_choices(path[0], options)).div(_choices(path[1], options));       
-    }
-
-    /**
-     * Options are ordered : [Ether, DepositToken, BorrowToken]
-     */
-    function _choices (
-        PPath pricePath, 
-        uint256[3] memory options
-    )
-    private
-    pure
-    returns (uint256 )
-    {
-        if (pricePath == PPath.Ether)  return options[0];
-        if (pricePath == PPath.DepositToken)  return options[1];
-        if (pricePath == PPath.BorrowToken)  return options[2];
+        return amount_.mul(factorx1000_).div(1000).preciseDiv(price_);
     }
 
     /**
@@ -545,17 +540,17 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     private
     returns (uint256 notionalBorrowAmount)
     {
-        address dToken = _zooIsBull(zooToken_) ? zooToken_.pair().base:zooToken_.pair().quote;
+        address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base:zooToken_.pair().quote;
         ILendingPool lender_ = getLender(zooToken_);
-        _invokeApprove(zooToken_, dToken, address(lender_) , depositAmount_);
+        zooToken_.invokeApprove( dAsset, address(lender_) , depositAmount_);
 
-        LendingCallInfo memory depositInfo = _createLendingCallInfo(
+        L3xUtils.LendingCallInfo memory depositInfo = _createLendingCallInfo(
             zooToken_, 
             AAVE_ADAPTER_NAME, 
-            dToken, 
+            dAsset, 
             depositAmount_
         );
-        _invokeDeposit(depositInfo);
+        depositInfo.invokeDeposit();
         // approve lender to receive swapped baseToken
         notionalBorrowAmount = _borrowAvailableAmount(
             zooToken_, 
@@ -566,56 +561,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         require(notionalBorrowAmount > 0, "L3xIssuanceModule: Borrowing unsuccessful");
     }
 
-    /**
-     * Swap base token and quote token according to trade direction and  user call (i.e. issue or redeem)
-     * @param zooToken_             Instance of the ZooToken to trade
-     * @param amountIn_            Amount to be traded
-     * @param minAmountOut_         Minimum amount demanded to be the output of the swap given exact amountIn_
-     */
-    function _swapQuoteAndBase(
-        IZooToken zooToken_,
-        uint256 amountIn_, 
-        uint256 minAmountOut_
-      ) 
-      private 
-      returns (uint256 amountOut) 
-    {
-        address borrowToken = _zooIsBull(zooToken_) ? zooToken_.pair().quote:zooToken_.pair().base;
 
-        IUniswapV2Router router_ = getRouter(zooToken_);
-        _invokeApprove(zooToken_, borrowToken, address(router_), amountIn_);
-        amountOut = _invokeSwap(zooToken_, amountIn_, minAmountOut_, true)[1]; 
-        require(amountOut != 0, "L3xIssueMod: Leveraging swapping failed");
-    }
-    /**
-     * Repay debt on Aave by swapping baseToken to quoteToken in order to repay
-     */
-    function _repayDebtForUser(
-        IZooToken zooToken_,
-        uint256 debtToRepayInDepositTokenCeil,
-        uint256 debtToRepay
-    ) 
-    private 
-    returns (uint256 [] memory amounts)
-    {
-        address bToken = _zooIsBull(zooToken_) ? zooToken_.pair().quote:zooToken_.pair().base; // borrowToken
-        address dToken = _zooIsBull(zooToken_) ? zooToken_.pair().base:zooToken_.pair().quote; // depositToken
-        IUniswapV2Router router_ = getRouter(zooToken_); 
-        ILendingPool lender_ = getLender(zooToken_);
-
-        _invokeApprove(zooToken_, dToken, address(router_), debtToRepayInDepositTokenCeil);
-        // Swap max amount of debtToRepayInBase of baseToken for  exact debtToRepayInQuote amount for quoteToken
-
-        amounts = _invokeSwap(zooToken_, debtToRepay, debtToRepayInDepositTokenCeil, false);
-        _invokeApprove(zooToken_, bToken, address(lender_), amounts[1]);
-        LendingCallInfo memory repayCallInfo = _createLendingCallInfo(
-            zooToken_, 
-            AAVE_ADAPTER_NAME, 
-            bToken,       
-            amounts[1] 
-        );
-        _invokeRepay(repayCallInfo);
-    }
 
     /**
      * Instigates ZooToken to borrow amount of token from Lender based on deposited collateral
@@ -631,132 +577,33 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         uint256 amountToBorrow
     )
     {
-        address bToken = _zooIsBull(zooToken_)? zooToken_.pair().quote:zooToken_.pair().base; // borrowToken
+        address bAsset = zooToken_.zooIsBull()? zooToken_.pair().quote:zooToken_.pair().base; // borrowToken
 
-        uint256 availableBorrows = addedCollateral.mul(BORROW_PORTION_FACTOR).div(1 ether);
-        availableBorrows = availableBorrows.mul(amountPerUnitCollateral).div(1 ether);
+        uint256 availableBorrows = addedCollateral.preciseMul(BORROW_PORTION_FACTOR);
+        availableBorrows = availableBorrows.preciseMul(amountPerUnitCollateral);
+        address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
 
         // borrow 99.9% of what available (otherwise reverts)
-        amountToBorrow =  _getEquivalentAmountViaOraclePrice(
-            zooToken_, 
+        amountToBorrow =  zooToken_.getEquivalentAmountViaOraclePrice(
+            oracle, 
             availableBorrows,
-            [PPath.DepositToken, PPath.BorrowToken]
+            [L3xUtils.PPath.DepositAsset, L3xUtils.PPath.BorrowAsset]
         );
         // amountToBorrow = availableBorrows.mul(dTokenPriceInETH).div(bTokenPriceInETH);
-        LendingCallInfo memory borrowInfo = _createLendingCallInfo(
+        L3xUtils.LendingCallInfo memory borrowInfo = _createLendingCallInfo(
             zooToken_, 
             lenderName_, 
-            bToken,
+            bAsset,
             amountToBorrow 
         );
-        _invokeBorrow(borrowInfo);
-    }
-
-    /**
-     * Instructs the ZooToken to call swap tokens of the ERC20 token on target Uniswap like dex 
-     *
-     * @param zooToken_        ZooToken instance to invoke
-     * @param amountExact_          Exact Amount of token to exchange
-     * Considered amountIn if shouldSwapExactTokensForTokens is true and amountOut otherwise
-     * @param amountEdge_          Amount of token to exchange in return for amountExact_
-     * Considered amountMax if shouldSwapExactTokensForTokens is true and amountMin otherwise
-     */
-    function _invokeSwap(
-        IZooToken zooToken_,
-        uint256 amountExact_,
-        uint256 amountEdge_,
-        bool shouldSwapExactTokensForTokens_ 
-    )
-    private 
-    returns (uint256[] memory amounts)
-    {
-        address bToken = _xnor(shouldSwapExactTokensForTokens_, _zooIsBull(zooToken_))? 
-             zooToken_.pair().quote:zooToken_.pair().base;
-        address dToken = _xnor(shouldSwapExactTokensForTokens_, _zooIsBull(zooToken_))? 
-             zooToken_.pair().base:zooToken_.pair().quote;
-
-        IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
-        (
-            address target,
-            uint256 callValue,
-            bytes memory methodData
-        ) = adapter.getTradeCalldata(
-            bToken, 
-            dToken, 
-            address(zooToken_), 
-            amountExact_, 
-            amountEdge_, 
-            shouldSwapExactTokensForTokens_,
-            ""
-        );
-        bytes memory data = zooToken_.invoke(target, callValue, methodData);
-        amounts = abi.decode(data, (uint256[]));
-    }
-    /**
-     * Instructs the ZooToken to set approvals of the ERC20 token to a spender.
-     *
-     * @param _zooToken        ZooToken instance to invoke
-     * @param _token           ERC20 token to approve
-     * @param _spender         The account allowed to spend the ZooToken's balance
-     * @param _quantity        The quantity of allowance to allow
-     */
-    function _invokeApprove(
-        IZooToken _zooToken,
-        address _token,
-        address _spender,
-        uint256 _quantity
-    )
-       private 
-    {
-        bytes memory callData = abi.encodeWithSignature("approve(address,uint256)", _spender, _quantity);
-        _zooToken.invoke(_token, 0, callData);
-    }
-
-    /**
-     *  Instigates the ZooToken to deposit asset in Lender
-     */
-    function _invokeDeposit(
-        LendingCallInfo memory depositInfo_
-    )
-       private 
-    {
-        (
-            address targetLendingPool,
-            uint256 callValue,
-            bytes memory methodData
-        ) = depositInfo_.lendingAdapter.getDepositCalldata(
-            depositInfo_.asset, 
-            depositInfo_.amount, 
-            address(depositInfo_.zooToken)
-        );
-        depositInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
-    }
-
-    /**
-     * Instigates ZooToken to borrow amound of asset against deposited collateral in lender
-     */
-    function _invokeBorrow(
-        LendingCallInfo memory borrowInfo_
-    )
-       private 
-    {
-        (
-            address targetLendingPool,
-            uint256 callValue,
-            bytes memory methodData
-        ) = borrowInfo_.lendingAdapter.getBorrowCalldata(
-            borrowInfo_.asset, 
-            borrowInfo_.amount, 
-            address(borrowInfo_.zooToken)
-        );
-        borrowInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
+        borrowInfo.invokeBorrow();
     }
 
     /**
      * Instigates ZooToken to Withdraw amount of deposited asset from lender
      */
     function _invokeWithdraw(
-        LendingCallInfo memory withdrawCallInfo_
+        L3xUtils.LendingCallInfo memory withdrawCallInfo_
     )
        private 
        returns (uint256 amountToWithdraw)
@@ -776,11 +623,43 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
 
     }
 
+
+    /**
+     * Repay debt on Aave by swapping baseToken to quoteToken in order to repay
+     */
+    function _repayDebtForUser(
+        IZooToken zooToken_,
+        uint256 debtToRepayInDepositAssetCeil,
+        uint256 debtToRepay
+    ) 
+    private 
+    returns (uint256 [] memory amounts)
+    {
+        address bAsset = zooToken_.zooIsBull() ? zooToken_.pair().quote:zooToken_.pair().base; // borrowToken
+        address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base:zooToken_.pair().quote; // depositToken
+        IUniswapV2Router router_ = getRouter(zooToken_); 
+        ILendingPool lender_ = getLender(zooToken_);
+
+        zooToken_.invokeApprove(dAsset, address(router_), debtToRepayInDepositAssetCeil);
+        // Swap max amount of debtToRepayInBase of baseToken for  exact debtToRepayInQuote amount for quoteAsset
+        IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
+
+        amounts = zooToken_.invokeSwap(adapter, debtToRepay, debtToRepayInDepositAssetCeil, false);
+        zooToken_.invokeApprove(bAsset, address(lender_), amounts[1]);
+        L3xUtils.LendingCallInfo memory repayCallInfo = _createLendingCallInfo(
+            zooToken_, 
+            AAVE_ADAPTER_NAME, 
+            bAsset,       
+            amounts[1] 
+        );
+        repayCallInfo.invokeRepay();
+    }
+
     /**
      * Instigates ZooToken to repay amount of debt to Lender
      */
     function _invokeRepay(
-        LendingCallInfo memory repayCallInfo_
+        L3xUtils.LendingCallInfo memory repayCallInfo_
     )
        private 
     {
@@ -795,14 +674,5 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         );
 
         repayCallInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
-    }
-
-    function _zooIsBull(IZooToken zooToken_) private view returns (bool)
-    {
-       return (zooToken_.side() == IZooToken.Side.Bull);
-    }
-
-    function _xnor (bool x, bool y) private pure returns (bool z) {
-        z = (x || !y ) && (!x || y);
     }
 }
