@@ -61,12 +61,14 @@ import "hardhat/console.sol";
   * * Entry point of the contract is issue in which the caller mints the zoo token (bear or bull).
   * * Minting a token incurs added debt on the zoken on behalf of caller due to borrowing from Aave.
   * * Debt is stored in a map for each caller.
+  * * Caller can issue the tokens to another address while charging the caller the amount in 
   * config:
   * * Config for each zoo assigned by manager.
   * * It stores the addresses of lender and dex router.
   * * It determines the amount to be borrowed from the deposited collateral for a given zoo 
   * redeem logic aims at:
   * * Transferring the underlying asset to the caller after deducting the amount of debt
+  * * Lending fees are accounted for by redeeming funds of user proportional to deposits on Aave
   *
   * IntegrationRegistry connected to this module provides calldata for external ecosystems (e.g Aave, Uniswap)
   * Position Multiplier decreases (i.e. inflation increases) when Manager accrues streaming fees
@@ -74,8 +76,27 @@ import "hardhat/console.sol";
   * Zoo is bull when BaseToken becomes the deposit asset and QuoteToken becomes the borrow asset
   *
   * Rebalancing is carried out in separate module
-  
-
+  *
+  *
+  * FIXME: Last withdrawal edge case, in which you need to do successive withdrawals and repay
+  *  - TODO write a require statement to block that
+  *  - might require multiple step external call instead
+  *  - TODO calculate threshold for which redeems are prohibited
+  *  - Might need admin function to default the token (withdraw colalteral)
+  * FIXME: Initialization of ecosystem: suppose 3 users issue tokes and price goes down on bull.
+  *  - Users won't be able even to redeem their funds even with loss ! FIX this 
+  *  - Depends on liquidation threshold discussion (risk assessment)
+  * FIXME: Borrow only on behalf of users in order to determine the debt for each one properly
+  * FIXME: relook positionMultiplier , do it on issue and redeem, Document inflation and Ask Andrew
+  *  - impose maximum on fee accrue period
+  * FIXME: More deposit for 3x lev
+  * TODO: beforeTokenTransfer
+  * TODO: Liquidation Threshold / Test position liquidation directly on Aave
+  * TODO: TODO: reassure inflationFee always less than 1 ether / Quantify when inflation reaches danger zone
+  * TODO: TODO: documenting
+  * TODO: TODO: events for zooToken and ZooStream
+  * TODO: Module viewer - getExposure - get expectedRedeem - show position in terms of base - show liquidation
+  * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
   *
   */ 
 
@@ -199,7 +220,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      * Tokens minted for user (caller) are proportion to the amount deposited and borrowed
      *
 
-     *
+     * @param to_               Address of beneficiary receiver of token
      * @param quantity_         Quantity of quote token input to go long 
      * @param price_            price of baseToken (i.e. ETH) in quoteToken (i.e. DAI)
      * @param swapFactorx1000_  The accepted portion of quantity_ to get through after deduction from fees. 
@@ -207,6 +228,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      */
     function issue (
         IZooToken zooToken_,
+        address to_,
         uint256 quantity_,
         uint256 price_,
         uint256 swapFactorx1000_  // TODO: to be replaced by slippage
@@ -215,28 +237,19 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         nonReentrant
         onlyValidAndInitializedSet(zooToken_)
     {
-        uint256 depositAmount  = _prepareAmountInForIssue (zooToken_, quantity_, price_, swapFactorx1000_);
-
-        uint256 borrowAmount;
-        uint256 totalAmount = depositAmount;
-        uint256 totalBorrowAmount;
-        IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
-        for (uint8 i = 0; i < 2; i++) {
-            borrowAmount = _borrowAgainstCollateral(zooToken_, depositAmount );
-            depositAmount = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, price_));
-
-            totalAmount = totalAmount.add(depositAmount);
-            totalBorrowAmount = totalBorrowAmount.add(borrowAmount);
-        }
-
+        uint256 depositAmount  = _prepareAmountInForIssue (zooToken_, msg.sender, quantity_, price_, swapFactorx1000_);
+        
         // Borrow quoteToken from lending Protocol
-        zooToken_.addDebt(msg.sender, totalBorrowAmount);
-        zooToken_.mint(msg.sender, totalAmount);
-        require(totalAmount != 0, "L3xIssueMod: Leveraging failed");
+        // totalAmountOut represents exposure
+        (
+            uint256 totalAmountOut, 
+            uint256 totalAmountDebt
+        )  =  _iterativeBorrow(zooToken_, depositAmount, swapFactorx1000_, price_);
+        _mintZoos(zooToken_, to_, totalAmountOut, totalAmountDebt);
 
         emit  Issued(
             zooToken_, 
-            msg.sender, 
+            to_, 
             zooToken_.pair().quote, 
             quantity_, 
             zooToken_.balanceOf(msg.sender), 
@@ -285,16 +298,15 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         // Withdraw 
         uint256 collateralPortion = _withdrawUserPortionOfTotalCollateral(zooToken_, quantity_);
 
-        uint256 redeems = currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]);
-        uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
-        redeems = redeems.mul(positionMultiplier).div(uint256(PreciseUnitMath.preciseUnitInt()));
-        _finalizeRedeem(zooToken_, quantity_, redeems, dAsset);
+        uint256 navToBeRedeemed = currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]);
+
+        uint256 nav = _finalizeRedeem(zooToken_, quantity_, navToBeRedeemed, dAsset);
 
         emit  Redeemed(
             zooToken_, 
             msg.sender, 
             dAsset, 
-            redeems, 
+            nav, 
             zooToken_.balanceOf(msg.sender), 
             zooToken_.getDebt(msg.sender)
         );
@@ -401,6 +413,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
 
     function _prepareAmountInForIssue(
         IZooToken zooToken_,
+        address creditor_,
         uint256 depositAmountInStableC_,
         uint256 depositAssetPrice_,
         uint256 swapFactorx1000_
@@ -408,7 +421,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     private
     returns (uint256 amountOut) 
     {
-        IERC20(zooToken_.pair().quote).transferFrom(msg.sender, address(zooToken_), depositAmountInStableC_);
+        IERC20(zooToken_.pair().quote).transferFrom(creditor_, address(zooToken_), depositAmountInStableC_);
         if(zooToken_.zooIsBull()){
            IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
            amountOut = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), depositAmountInStableC_, _multiplyByFactorSwap(depositAmountInStableC_, swapFactorx1000_, depositAssetPrice_)); 
@@ -418,6 +431,47 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         }
     }
 
+    function _iterativeBorrow(
+        IZooToken zooToken_,
+        uint256 depositAmount_,
+        uint256 swapFactorx1000_,
+        uint256 price_
+    )
+    private
+    returns (
+        uint256 totalAmountOut,
+        uint256 totalAmountDebt
+    )
+    {
+        uint256 borrowAmount;
+        totalAmountOut = depositAmount_;
+
+        IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
+        for (uint8 i = 0; i < 2; i++) {
+            borrowAmount = _borrowAgainstCollateral(zooToken_, depositAmount_ );
+            depositAmount_ = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, price_));
+
+            totalAmountOut = totalAmountOut.add(depositAmount_);
+            totalAmountDebt = totalAmountDebt.add(borrowAmount);
+        }
+
+    }
+
+    function _mintZoos(
+        IZooToken zooToken_,
+        address to_,
+        uint256 exposure_,
+        uint256 debt
+    )
+    private 
+    {
+        zooToken_.addDebt(to_, debt);
+        uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
+        uint256 mints = exposure_.mul(PreciseUnitMath.preciseUnit()).div(positionMultiplier);
+        zooToken_.mint(to_, mints);
+        require(mints !=  0, "L3xIssueMod: Leveraging failed");
+    }
+
     function _finalizeRedeem (
         IZooToken zooToken_,
         uint256 quantity_,
@@ -425,9 +479,13 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         address dAsset_
     ) 
     private 
+    returns (uint256 nav)
     {
+        uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
+        nav = redeems_.mul(positionMultiplier).div(PreciseUnitMath.preciseUnit());
+
         zooToken_.burn(msg.sender, quantity_);
-        zooToken_.transferAsset(IERC20(dAsset_), msg.sender, redeems_);
+        zooToken_.transferAsset(IERC20(dAsset_), msg.sender, nav);
     }
 
     /**

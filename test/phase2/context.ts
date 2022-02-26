@@ -133,7 +133,7 @@ class Context {
         deployedZooToken.address,
         {
           feeRecipient: this.accounts.protocolFeeRecipient.address,
-          maxStreamingFeePercentage: ether(0.05),  // 5%
+          maxStreamingFeePercentage: ether(0.25),  // 25%
           streamingFeePercentage: ether(0.01),     // 1%
           lastStreamingFeeTimestamp: ether(0)      // Timestamp is overriden 
         }
@@ -159,7 +159,7 @@ class Context {
   public async issueZoos(zoo: ZooToken, amount: BigNumber, price: BigNumber, to: Account): Promise<void> {
        await this.tokens.mockDai.mint(to.address, amount);
        await this.tokens.mockDai.connect(to.wallet).approve(this.subjectModule.address, amount);
-       await this.subjectModule.connect(to.wallet).issue(zoo.address, amount, price,  985);
+       await this.subjectModule.connect(to.wallet).issue(zoo.address, to.address, amount, price,  985);
   }
 
   public async configureZoo(zoo: ZooToken, amountPerUnitCollateral: BigNumber): Promise<void> {

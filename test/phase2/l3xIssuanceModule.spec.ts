@@ -48,6 +48,9 @@ import {
   initUniswapRouter
 } from './context';
 
+// TODO: Test event emit
+// TODO: Tests with prices change (losses, wins) (MORE)
+// TODO: Consider upgradeability test (changing factors in Module - maintaining state of token)
 
 
 
@@ -331,7 +334,7 @@ describe("IssuanceModule", () => {
       it("SubjectModule deposits weth and borrows against it on behalf of zooToken", async ()=>{
         let wethAmount = 10;
         await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-        await ctx.subjectModule.issue(zToken.address, ether(10000), ether(1000), 985);
+        await ctx.subjectModule.issue(zToken.address, owner.address, ether(10000), ether(1000), 985);
         
         let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
 
@@ -362,7 +365,7 @@ describe("IssuanceModule", () => {
         let expectedDaiOut = amountIn.mul(ether(leverage)).div(ether(1));
 
         await ctx.tokens.mockDai.approve(ctx.subjectModule.address, amountIn);
-        await ctx.subjectModule.issue(bearToken.address, amountIn, ether(1000), 985);
+        await ctx.subjectModule.issue(bearToken.address, owner.address, amountIn, ether(1000), 985);
         
         let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bearToken.address));
 
@@ -941,7 +944,6 @@ describe("IssuanceModule", () => {
         feeRecipient = ctx.accounts.protocolFeeRecipient; 
         await ctx.issueZoos(zToken, ether(3000), ether(1000), bob);
       });
-      // TODO: scenario with issuing after acruing fee - this to test inflation
       it ("accrueFee() - fee is calculated as expected/increase totalSupply by correct amount", async () => {
           let totalSupplyBeforeAccrue = await zToken.totalSupply();
           let timeBeforeAccrue = (await ctx.ct.streamingFee.feeStates(zToken.address)).lastStreamingFeeTimestamp;
@@ -994,6 +996,67 @@ describe("IssuanceModule", () => {
           // check fee gained by feeRecipient
           expect(feeRecipientBalanceLatest2.sub(feeRecipientBalanceLatest)).to.approx(feeExpected2)
       });
+
+      it.only("issue() after inflation - verify inflation is affected as expected after streaming", async () => {
+          let accrueRate = ether(0.2);
+          let amountIn = ether(3000);
+          let feeRecipientBalance = await zToken.balanceOf(feeRecipient.address);
+          await ctx.ct.streamingFee.updateStreamingFee(zToken.address, accrueRate);  // 20% fee yearly
+          
+          //  Advance timestamp
+          await ethers.provider.send('evm_increaseTime', [3600*24*365]);  // one year 
+          let totalSupplyBeforeAccrue = await zToken.totalSupply();
+          await ctx.ct.streamingFee.accrueFee(zToken.address);
+          let feeRecipientBalanceLatest = await zToken.balanceOf(feeRecipient.address);
+          let feeExpected =  totalSupplyBeforeAccrue.mul(accrueRate).div(ether(1).sub(accrueRate));
+        
+          // check fee gained by feeRecipient
+          expect(feeRecipientBalanceLatest.sub(feeRecipientBalance)).to.approx(feeExpected);
+          
+          let multiplier = await zToken.positionMultiplier();
+          expect(multiplier).to.be.approx(ether(1).sub(accrueRate));
+          await ctx.issueZoos(zToken, amountIn, ether(1000), alice);
+          let aliceZooBalance = await zToken.balanceOf(alice.address);
+          let bobZooBalance = await zToken.balanceOf(bob.address);
+
+          let expectedAliceBalance = bobZooBalance.mul(ether(1)).div(multiplier);
+
+          expect(aliceZooBalance).to.be.approx(expectedAliceBalance);
+      });
+      // TODO: TODO: redeem after inflation - this to test inflation - do similar example with shorter periods
+      it.only("issue() after inflation - verify inflation is affected as expected after streaming", async () => {
+          let accrueRate = ether(0.2);
+          let amountIn = ether(3000);
+          let feeRecipientBalance = await zToken.balanceOf(feeRecipient.address);
+          await ctx.ct.streamingFee.updateStreamingFee(zToken.address, accrueRate);  // 20% fee yearly
+          
+          //  Advance timestamp
+          await ethers.provider.send('evm_increaseTime', [3600*24*365]);  // one year 
+          let totalSupplyBeforeAccrue = await zToken.totalSupply();
+          await ctx.ct.streamingFee.accrueFee(zToken.address);
+          let feeRecipientBalanceLatest = await zToken.balanceOf(feeRecipient.address);
+          let feeExpected =  totalSupplyBeforeAccrue.mul(accrueRate).div(ether(1).sub(accrueRate));
+        
+          // check fee gained by feeRecipient
+          expect(feeRecipientBalanceLatest.sub(feeRecipientBalance)).to.approx(feeExpected);
+          
+          let multiplier = await zToken.positionMultiplier();
+          expect(multiplier).to.be.approx(ether(1).sub(accrueRate));
+          // TODO: TODO: Redeem here
+          // FIXME:  does not return proportional amount
+          let initBobWethBalance = await ctx.tokens.weth.balanceOf(bob.address);
+          await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, ether(1));
+          let finalBobWethBalance = await ctx.tokens.weth.balanceOf(bob.address);
+          console.log(initBobWethBalance.toString());
+          console.log(finalBobWethBalance.toString());
+          // await ctx.issueZoos(zToken, amountIn, ether(1000), alice);
+          // let aliceZooBalance = await zToken.balanceOf(alice.address);
+          // let bobZooBalance = await zToken.balanceOf(bob.address);
+
+          // let expectedAliceBalance = bobZooBalance.mul(ether(1)).div(multiplier);
+
+          // expect(aliceZooBalance).to.be.approx(expectedAliceBalance);
+      });
     });
 
 
@@ -1004,7 +1067,7 @@ describe("IssuanceModule", () => {
       // @dev at this stage rebalancing takes place after redeem()   
       let wethAmount = 10;
        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-       await ctx.subjectModule.issue(zToken.address, ether(10000), ether(1000), 985);
+       await ctx.subjectModule.issue(zToken.address, owner.address, ether(10000), ether(1000), 985);
 
        let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
        console.log((await ctx.tokens.weth.balanceOf(zToken.address)).toString());
