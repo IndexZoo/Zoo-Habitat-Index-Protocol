@@ -91,6 +91,8 @@ contract ZooToken is ERC20 {
     event ExternalPositionDataEdited(address indexed _component, address indexed _positionModule, bytes _data);
     event PositionModuleAdded(address indexed _component, address indexed _positionModule);
     event PositionModuleRemoved(address indexed _component, address indexed _positionModule);
+    event DebtPaid(address indexed _holder, uint256 _amount, uint256 _debt);
+    event DebtIssued(address indexed _holder, uint256 _amount, uint256 _debt);
 
     /* ============ Modifiers ============ */
 
@@ -194,7 +196,6 @@ contract ZooToken is ERC20 {
         public
         ERC20(_name, _symbol)
     {
-        // TODO: TODO: refactor and add baseToken & quoteToken variables
         controller = _controller;
         manager = _manager;
         positionMultiplier = PreciseUnitMath.preciseUnit();
@@ -378,6 +379,7 @@ contract ZooToken is ERC20 {
     function addDebt(address _account, uint256 _quantity) external onlyModule whenLockedOnlyLocker {
        _debts[_account] = _debts[_account].add(_quantity) ;
        _totalDebt = _totalDebt.add(_quantity);
+       emit DebtIssued(_account, _quantity, _debts[_account]);
     }
 
     /**
@@ -391,6 +393,7 @@ contract ZooToken is ERC20 {
         // Math unchecked
         _debts[_account] = _debts[_account] - amount ;
         _totalDebt = _totalDebt - amount;
+       emit DebtPaid(_account, _quantity, _debts[_account]);
     }
 
     /**
