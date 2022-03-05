@@ -168,7 +168,26 @@ library L3xUtils {
         equivalentAmount = amount.mul(_choices(path[0], options)).div(_choices(path[1], options));       
     }
 
+    function invokeWithdraw(
+        L3xUtils.LendingCallInfo memory withdrawCallInfo_
+    )
+       internal 
+       returns (uint256 amountToWithdraw)
+    {
+        (
+            address targetLendingPool,
+            uint256 callValue,
+            bytes memory methodData
+        ) = withdrawCallInfo_.lendingAdapter.getWithdrawCalldata(
+            withdrawCallInfo_.asset, 
+            withdrawCallInfo_.amount, 
+            address(withdrawCallInfo_.zooToken)
+        );
 
+        bytes memory data = withdrawCallInfo_.zooToken.invoke(targetLendingPool, callValue, methodData);
+        amountToWithdraw = abi.decode(data, (uint256));
+
+    }
 
    /**
      *  Instigates the ZooToken to deposit asset in Lender

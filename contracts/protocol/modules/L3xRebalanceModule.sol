@@ -171,19 +171,37 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
             zoos, 
             [L3xUtils.PPath.DepositAsset, L3xUtils.PPath.BorrowAsset ]
         ); 
-        uint256 borrowAmount = _calculateBorrowAmount(zoos, debt, bpd); 
-        uint256 depositAmount = _addToDepositForRebalance(zooToken_, zoos, debt, bpd);
+        (bool isBorrow, uint256 amount) = _calculateBorrowOrRepayAmount(zoos, debt, bpd);
 
-        uint borrowAmountSwapped = _borrowForRebalance(zooToken_, borrowAmount);
+        require(amount != 0,  "No change in position for Rebalance");
 
-        zooToken_.mint(msg.sender, borrowAmountSwapped);
+        if (isBorrow) {
+            uint256 depositAmount = _addToDepositForRebalance(zooToken_, zoos, debt, bpd);
 
-        emit TokenRebalancedForHolder(
-            zooToken_, 
-            msg.sender, 
-            zooToken_.balanceOf(msg.sender),
-            zooToken_.getDebt(msg.sender)
-        );
+            uint borrowAmount = _borrowForRebalance(zooToken_, amount);
+
+            zooToken_.mint(msg.sender, borrowAmount);
+
+            emit TokenRebalancedForHolder(
+                zooToken_, 
+                msg.sender, 
+                zooToken_.balanceOf(msg.sender),
+                zooToken_.getDebt(msg.sender)
+            );
+        }  else {
+            // FIXME: dependency -> liquidation Module (i.e. it requires healthy token)
+            uint256[] memory amountsRepaid = _repayDebtForUser(zooToken_, amount.mul(1000).div(900), amount);
+            uint256 withdrawAmount = _withdrawPortion(zooToken_, zoos, debt, bpd);
+
+            // zooToken_.burn(msg.sender, amountsRepaid[0]);
+
+            // emit TokenRebalancedForHolder(
+            //     zooToken_, 
+            //     msg.sender, 
+            //     zooToken_.balanceOf(msg.sender),
+            //     zooToken_.getDebt(msg.sender)
+            // );
+        }
     }
 
     /**
@@ -312,6 +330,35 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
 
     }
 
+    function _withdrawPortion (
+        IZooToken zooToken_,
+        uint256 exposure_,
+        uint256 debt_,
+        uint256 bpd_
+    )
+    private
+    returns (uint256 withdrawAmount_)
+    {
+        address dAsset = zooToken_.pair().base;
+
+        uint256 withdrawAmount = _calculateDepositOrWithdrawAmount(exposure_, debt_, bpd_, false);
+        address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
+
+        withdrawAmount_ = zooToken_.getEquivalentAmountViaOraclePrice(
+            oracle, 
+            withdrawAmount, 
+            [L3xUtils.PPath.BorrowAsset, L3xUtils.PPath.DepositAsset ]
+        );
+
+        L3xUtils.LendingCallInfo memory withdrawInfo = _createLendingCallInfo(
+            zooToken_, 
+            AAVE_ADAPTER_NAME, 
+            dAsset, 
+            withdrawAmount_
+        );
+        // TODO: NOTE: Just do not do if you don't have enough collateral 
+        withdrawInfo.invokeWithdraw();
+    }
 
     function _addToDepositForRebalance (
         IZooToken zooToken_,
@@ -324,7 +371,7 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     {
         address dAsset = zooToken_.pair().base;
 
-        uint256 depositAmount = _calculateDepositAmount(exposure_, debt_, bpd_);
+        uint256 depositAmount = _calculateDepositOrWithdrawAmount(exposure_, debt_, bpd_, true);
         address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
 
         depositAmount_ = zooToken_.getEquivalentAmountViaOraclePrice(
@@ -347,43 +394,55 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     }
 
 
-    function _calculateBorrowAmount(
+    function _calculateBorrowOrRepayAmount(
         uint256 exposure_,
         uint256 debt_,
         uint256 bpd_ 
     )
     private
     pure
-    returns(uint256 )
+    returns(bool isBorrow, uint256 amount)
     {
-        uint256 s1 = bpd_ * bpd_ / 1 ether + bpd_;  // safe !
+        uint256 s1 =  bpd_*bpd_/1 ether *bpd_/1 ether +  bpd_ * bpd_ / 1 ether + bpd_;  // safe !
         uint256 s2 = s1 + 1 ether;
-        uint256 x_ = exposure_.preciseDiv(s2);
+        uint256 x_ = exposure_.preciseDiv(s2);  // final price
+        uint256 c1 = x_.preciseMul(s1).preciseMul(s2);
+        uint256 c2 =  debt_.preciseMul(s2);
 
-        uint256 borrowAmount = x_.preciseMul(s1).preciseMul(s2) .sub(debt_.preciseMul(s2));
-        return borrowAmount;
+        if (c1 == c2) {
+            amount = 0;
+        } else if (c1 > c2) {
+           isBorrow = true; 
+           amount =  c1 - c2;
+        } else {
+            isBorrow = false;
+            amount = c2 - c1;
+        }
     }
 
-    function _calculateDepositAmount(
+    function _calculateDepositOrWithdrawAmount(
         uint256 exposure_,
         uint256 debt_,
-        uint256 bpd_
+        uint256 bpd_,
+        bool isBorrow
     )
     private
     pure
     returns(uint256 ) 
     {
-        uint256 s0 = STD_SCALER + bpd_;
-        uint256 s1 = bpd_ * bpd_ / STD_SCALER + bpd_;  // safe !
+        uint256 s0 = STD_SCALER + bpd_ + bpd_*bpd_/1 ether;
+        uint256 s1 = bpd_ * bpd_ / STD_SCALER + bpd_ + bpd_ * bpd_ / STD_SCALER * bpd_/STD_SCALER;  // safe !
         uint256 s2 = s1 + STD_SCALER;
         
         uint256 x = debt_.preciseDiv(s1);    // initial price
         uint256 x_ = exposure_.preciseDiv(s2);
         
         uint256 priceJump = x_.preciseDiv(x); // TODO:  if less than 1 ether (i.e. loss) do withdraw and repay
+        uint256 delta = isBorrow? priceJump.sub(STD_SCALER) : STD_SCALER.sub(priceJump);
+        
         uint256 depositAmount = s0.preciseMul(s1); 
         depositAmount = depositAmount.preciseMul(x); 
-        depositAmount = depositAmount.preciseMul(priceJump.sub(1 ether)); 
+        depositAmount = depositAmount.preciseMul(delta); 
         return depositAmount;
     }
 
@@ -403,31 +462,33 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     /**
      * Repay debt on Aave by swapping baseToken to quoteToken in order to repay
      */
-    // function _repayDebtForUser(
-    //     IZooToken zooToken_,
-    //     uint256 debtToRepayInDepositTokenCeil,
-    //     uint256 debtToRepay
-    // ) 
-    // private 
-    // returns (uint256 [] memory amounts)
-    // {
-    //     address bAsset = zooToken_.zooIsBull() ? zooToken_.pair().quote:zooToken_.pair().base; // borrowToken
-    //     address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base:zooToken_.pair().quote; // depositToken
-    //     IUniswapV2Router router_ = getRouter(zooToken_); 
-    //     ILendingPool lender_ = getLender(zooToken_);
+    function _repayDebtForUser(
+        IZooToken zooToken_,
+        uint256 debtToRepayInDepositTokenCeil,
+        uint256 debtToRepay
+    ) 
+    private 
+    returns (uint256 [] memory amounts)
+    {
+        // FIXME: work on here -- deltaDebt
+        address bAsset = zooToken_.zooIsBull() ? zooToken_.pair().quote:zooToken_.pair().base; // borrowToken
+        address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base:zooToken_.pair().quote; // depositToken
+        IUniswapV2Router router_ = getRouter(zooToken_); 
+        ILendingPool lender_ = getLender(zooToken_);
 
-    //     zooToken_.invokeApprove(dAsset, address(router_), debtToRepayInDepositTokenCeil);
-    //     // Swap max amount of debtToRepayInBase of baseToken for  exact debtToRepayInQuote amount for quoteToken
+        zooToken_.invokeApprove(dAsset, address(router_), debtToRepayInDepositTokenCeil);
+        // Swap max amount of debtToRepayInBase of baseToken for  exact debtToRepayInQuote amount for quoteToken
 
-    //     IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
-    //     amounts = zooToken_.invokeSwap(adapter, debtToRepay, debtToRepayInDepositTokenCeil, false);
-    //     zooToken_.invokeApprove( bAsset, address(lender_), amounts[1]);
-    //     L3xUtils.LendingCallInfo memory repayCallInfo = _createLendingCallInfo(
-    //         zooToken_, 
-    //         AAVE_ADAPTER_NAME, 
-    //         bAsset,       
-    //         amounts[1] 
-    //     );
-    //     repayCallInfo.invokeRepay();
-    // }
+        IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
+        amounts = zooToken_.invokeSwap(adapter, debtToRepay, debtToRepayInDepositTokenCeil, false);
+        zooToken_.invokeApprove( bAsset, address(lender_), amounts[1]);
+        L3xUtils.LendingCallInfo memory repayCallInfo = _createLendingCallInfo(
+            zooToken_, 
+            AAVE_ADAPTER_NAME, 
+            bAsset,       
+            amounts[1] 
+        );
+        zooToken_.payDebt(msg.sender, amounts[1]);
+        repayCallInfo.invokeRepay();
+    }
 }

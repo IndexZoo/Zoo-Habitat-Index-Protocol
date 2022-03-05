@@ -332,23 +332,25 @@ describe("IssuanceModule", () => {
     });
     describe("SubjectModule Issuing", async () => {
       it("SubjectModule deposits weth and borrows against it on behalf of zooToken", async ()=>{
-        let wethAmount = 10;
-        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, ether(10000));
-        await ctx.subjectModule.issue(zToken.address, owner.address, ether(10000), ether(1000), 985);
+        let wethAmount = 1;
+        let daiAmount = ether(1000);
+        let iters = 3;    // iterative deposits 
+        await ctx.tokens.mockDai.approve(ctx.subjectModule.address, daiAmount);
+        await ctx.subjectModule.issue(zToken.address, owner.address, daiAmount, ether(1000), 985);
         
         let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
 
         // leverage represented in thousands (i.e. 2500 leverage ~ 2.5x leverage)
         let leverage = ether(wethAmount).add(userData.totalDebtETH).mul(1000).div(ether(wethAmount));
 
-        expect(leverage).to.be.gt(2000);   // leverage ~ 2425 for minimum healthFactor/maximum risk
+        expect(leverage).to.be.gt(2500);   // leverage ~ 2.935 for minimum healthFactor/maximum risk
         expect(userData.currentLiquidationThreshold).to.gt(BigNumber.from(8000));
-        expect(userData.totalCollateralETH).to.be.gt(ether(wethAmount)).to.be.lt(ether(20));
+        expect(userData.totalCollateralETH).to.be.gt(ether(wethAmount).mul(2)).to.be.lt(ether(3));
         expect(userData.healthFactor).to.gt(ether(1));  // ~ 1.03 ETH 
-        expect(await zToken.balanceOf(owner.address)).to.be.gt(ether(20));
+        expect(await zToken.balanceOf(owner.address)).to.be.gt(ether(2.5));  // exposure = leverage * input
 
-        // amount weth expected on the second borrow = 10 * 0.8 * 0.8 - fees
-        expect(await ctx.tokens.weth.balanceOf(zToken.address)).to.be.gt(ether(wethAmount/2)).to.be.lt(ether(wethAmount*0.64));
+        // amount weth expected on the second borrow = 1 * 0.8 **3 - fees
+        expect(await ctx.tokens.weth.balanceOf(zToken.address)).to.be.approx(ether(wethAmount*0.8**iters));
       });
     });
 
@@ -360,7 +362,9 @@ describe("IssuanceModule", () => {
         let amountIn = ether(1000);
         let wethAmount = ether(1);
         let borrowFactor = 0.75;
-        let leverage = 1 + borrowFactor + borrowFactor**2;
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
         // Dai amount expected after issuing - becomes a zoo bear balance of user
         let expectedDaiOut = amountIn.mul(ether(leverage)).div(ether(1));
 
@@ -382,8 +386,10 @@ describe("IssuanceModule", () => {
         let amountIn = ether(1000);
         let wethAmount = ether(1);
         let borrowFactor = 0.75;
-        let leverage = 1 + borrowFactor + borrowFactor**2;
-        let redeemAmount = ether(850);
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
+        let redeemAmount = ether(550);
         let amountOut = amountIn.mul(ether(leverage)).div(ether(1));
 
         // finalExpectedDebt = amountIn*(leverage-1) - r (leverage-1)/leverage
@@ -397,7 +403,7 @@ describe("IssuanceModule", () => {
 
         await ctx.subjectModule.connect(bob.wallet).redeem(bearToken.address, redeemAmount);
 
-        expect(await bearToken.getDebt(bob.address)).to.be.approx(finalExpectedDebt);  // ~ 0.826 Weth 
+        expect(await bearToken.getDebt(bob.address)).to.be.approx(finalExpectedDebt);  // ~ 1.377 Weth 
         expect(await ctx.tokens.mockDai.balanceOf(bob.address)).to.be.approx(finalExpectedDaiBalance);   // ~ 366 DAI
       });
       
@@ -405,8 +411,10 @@ describe("IssuanceModule", () => {
         let amountIn = ether(1000);
         let wethAmount = ether(1);
         let borrowFactor = 0.75;
-        let leverage = 1 + borrowFactor + borrowFactor**2;
         let redeemAmount = ether(1500);
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
         let amountOut = amountIn.mul(ether(leverage)).div(ether(1));
 
         // finalExpectedDebt = amountIn*(leverage-1) - r (leverage-1)/leverage
@@ -415,14 +423,14 @@ describe("IssuanceModule", () => {
         let finalExpectedDaiBalance = redeemAmount.mul(amountIn).div(amountOut);
 
         await ctx.issueZoos(bearToken, amountIn, ether(1000), bob);
-        await ctx.issueZoos(bearToken, amountIn.mul(4), ether(1000), oscar);
+        await ctx.issueZoos(bearToken, amountIn.mul(8), ether(1000), oscar);
         
         let userData = (await ctx.aaveFixture.lendingPool.getUserAccountData(bearToken.address));
 
         await ctx.subjectModule.connect(bob.wallet).redeem(bearToken.address, redeemAmount);
 
         expect(await bearToken.getDebt(bob.address)).to.be.approx(finalExpectedDebt);  // 
-        expect(await ctx.tokens.mockDai.balanceOf(bob.address)).to.be.approx(finalExpectedDaiBalance);   // ~ 366 DAI
+        expect(await ctx.tokens.mockDai.balanceOf(bob.address)).to.be.approx(finalExpectedDaiBalance);   // ~ 552 DAI
 
       });
 
@@ -435,12 +443,14 @@ describe("IssuanceModule", () => {
         let amountIn = ether(1000);
         let wethAmount = ether(1);
         let borrowFactor = 0.75;
-        let leverage = 1 + borrowFactor + borrowFactor**2;
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
         let redeemAmount = MAX_UINT_256;
         let amountOut = amountIn.mul(ether(leverage)).div(ether(1));
 
         await ctx.issueZoos(bearToken, amountIn, ether(1000), bob);
-        await ctx.issueZoos(bearToken, amountIn.mul(4), ether(1000), oscar);
+        await ctx.issueZoos(bearToken, amountIn.mul(6), ether(1000), oscar);
 
         let bobZooBalance = await bearToken.balanceOf(bob.address);
         
@@ -448,7 +458,7 @@ describe("IssuanceModule", () => {
 
         await ctx.subjectModule.connect(bob.wallet).redeem(bearToken.address, redeemAmount);
         expect(await bearToken.getDebt(bob.address)).to.be.equal(0);  // 
-        expect(await ctx.tokens.mockDai.balanceOf(bob.address)).to.be.approx(amountIn);  // ~ 366 DAI
+        expect(await ctx.tokens.mockDai.balanceOf(bob.address)).to.be.approx(amountIn);  // ~ 998.5 DAI
       });
 
       /**
@@ -462,9 +472,11 @@ describe("IssuanceModule", () => {
         let amountIn = ether(1000);
         let wethAmount = ether(1);
         let borrowFactor = 0.75;
-        let leverage = 1 + borrowFactor + borrowFactor**2;
-        let redeemAmount = ether(850);
-        let redeemAmount2 = ether(250);
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
+        let redeemAmount = ether(550);
+        let redeemAmount2 = ether(150);
         let amountOut = amountIn.mul(ether(leverage)).div(ether(1));
 
         // finalExpectedDebt = amountIn*(leverage-1) - r (leverage-1)/leverage
@@ -481,8 +493,8 @@ describe("IssuanceModule", () => {
         let bobZooBalance1 = await bearToken.balanceOf(bob.address);
 
         expect(bobZooBalance0.sub(bobZooBalance1)).to.be.eq(redeemAmount);
-        expect(await bearToken.getDebt(bob.address)).to.be.approx(finalExpectedDebt);  // ~ 0.826 Weth 
-        expect(await ctx.tokens.mockDai.balanceOf(bob.address)).to.be.approx(finalExpectedDaiBalance);   // ~ 366 DAI
+        expect(await bearToken.getDebt(bob.address)).to.be.approx(finalExpectedDebt);  // ~ 1.37 Weth 
+        expect(await ctx.tokens.mockDai.balanceOf(bob.address)).to.be.approx(finalExpectedDaiBalance);   // ~ 200 DAI
 
         await ctx.subjectModule.connect(bob.wallet).redeem(bearToken.address, redeemAmount2);
         let bobZooBalance2 = await bearToken.balanceOf(bob.address);
@@ -501,16 +513,19 @@ describe("IssuanceModule", () => {
        * EXPECT user retrieve expected dai (quoteToken) balance
        * EXPECT user have the redeemed zoo tokens burnt
        * EXPECT debt to decrease by expected amount
+       * @note Leverage is determined w.r.t WETH price against DAI
        */
       it("Three user issues Zoo against 1000 DAI then Bob redeems all zoo after price change", async ()=>{
-        await ctx.configZooWithMockRouter(bearToken, ether(0.75));
+        await ctx.configZooWithMockRouter(bearToken, ether(0.75)); // 
         let initDaiBalance = ether(1000);
         let initWethAmount = ether(1);
         let borrowFactor = 0.75;
-        let leverage = 1 + borrowFactor + borrowFactor**2;
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
         await ctx.issueZoos(bearToken, initDaiBalance, ether(1000), bob);
         await ctx.issueZoos(bearToken, initDaiBalance, ether(1000), alice);
-        await ctx.issueZoos(bearToken, initDaiBalance, ether(1000), oscar);
+        await ctx.issueZoos(bearToken, initDaiBalance.mul(3), ether(1000), oscar);
 
         let initZooBalance = await bearToken.balanceOf(bob.address);
         let initUserDebt = await bearToken.getDebt(bob.address);
@@ -540,7 +555,7 @@ describe("IssuanceModule", () => {
         // profit_in_weth * leverage + initWeth =  0.25 * 2.3  + 1 
         let expectedEquivalentWeth = ether(0.25).mul(ether(leverage)).div(ether(1)).add(initWethAmount);
         expect(finalZooBalance).to.be.eq(ether(0));
-        expect(finalBobDaiBalance).to.be.approx(expectedEquivalentWeth.mul(800));
+        expect(finalBobDaiBalance).to.be.approx(expectedEquivalentWeth.mul(800));  // 1346 DAI
       });   
 
     });
@@ -551,15 +566,18 @@ describe("IssuanceModule", () => {
        * EXPECT user debt to increase accordingly 
        */
       it("Investor issues tokens debt is initiated ", async ()=>{
-        let initDaiBalance = ether(10000);
-        let initWethAmount = ether(10);
-        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
+        let initDaiBalance = ether(1000);
+        let initWethAmount = ether(1);
+        let iters = 3;
+        let factor = 0.8;
+        let price = 1000;
+        await ctx.issueZoos(zToken, initDaiBalance, ether(price), bob);
 
         let initZooBalance = await zToken.balanceOf(bob.address);
         let initUserDebt = await zToken.getDebt(bob.address);
 
-        // (initWethAmount*0.8 + initWethAmount * 0.8 * 0.8 ) * 1000
-        let expectedFinalUserDebt = initWethAmount.mul(ether(0.8)).add(initWethAmount.mul(ether(0.8*0.8))).div(ether(1)).mul(1000);
+        // factor**1+factor**2+factor**3 =  (1-factor**(iters+1)) / (1-factor)   -  1
+        let expectedFinalUserDebt = ( ether(1).sub(ether(factor**(iters+1)))  ).mul(ether(1)).div(ether(1).sub(ether(factor))).sub(ether(1)).mul(price);
 
         // Expect to have no balance available for borrowing before calling the redeem
         // Expect to have avaialable margin to borrow from after the redeem call
@@ -567,7 +585,7 @@ describe("IssuanceModule", () => {
 
         // Expect WETH balance after redeem to be initWethAmount*redeemAmount/initZooBalance
         expect(await zToken.getDebt(bob.address)).to.be.approx(expectedFinalUserDebt)
-        expect(await zToken.getDebt(bob.address)).to.be.approx(zooAaveData.totalDebtETH.mul(1000));
+        expect(await zToken.getDebt(bob.address)).to.be.approx(zooAaveData.totalDebtETH.mul(price));
         
       });
     });
@@ -583,13 +601,20 @@ describe("IssuanceModule", () => {
        */
       it("One user issues Zoo against 10000 DAI then redeems 5 Zoos", async ()=>{
         await ctx.configZooWithMockRouter(zToken);
-        let initDaiBalance = ether(10000);
-        let initWethAmount = ether(10);
+        let initDaiBalance = ether(1000);
+
+        let initWethAmount = ether(1);
+        let borrowFactor = 0.8;
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
+        let s1 = leverage - 1;
+        let s0 = leverage - borrowFactor**iters;
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
 
         let initZooBalance = await zToken.balanceOf(bob.address);
         let initUserDebt = await zToken.getDebt(bob.address);
-        let redeemAmount = ether(5);
+        let redeemAmount = ether(0.5);
 
         // change price to 1 ETH = 2000 DAI
         await ctx.aaveFixture.setAssetPriceInOracle(ctx.tokens.mockDai.address, ether(0.0005));
@@ -602,17 +627,17 @@ describe("IssuanceModule", () => {
         let zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
 
         // total debt is expected to be halved because of price change 
-        expect(zooAaveData.totalDebtETH).to.be.approx(ether(7.2));
+        expect(zooAaveData.totalDebtETH).to.be.approx(ether(s1).div(2));
         await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, redeemAmount);
         
-        let debtToRepay = ether(5).mul(ether(7.2)).div(ether(24.4));
+        let debtToRepay = redeemAmount.mul(ether(s1).div(2)).div(ether(leverage));   // ; zooBalance = leverage
         let finalZooBalance = await zToken.balanceOf(bob.address);
         let finalAccountWethBalance = await ctx.tokens.weth.balanceOf(bob.address);
 
         // expectedBorrowAllowance = (initCollateral - redeemAmount*initCollateral/zooBalance)* new_price * 0.8
         // alreadyBorrowed = initDaiDebt - redeemAmount * initDaiDebt/24.4
         // expectedAvBorrow = (expectedBorrowAllowance - alreadyBorrowed)
-        let expectedAvBorrowInDai =  ether(18).mul(2000*0.8).sub(ether(14.4).mul(1000)).mul( ether(1).sub(redeemAmount.mul(ether(1)).div(initZooBalance) ) );
+        let expectedAvBorrowInDai =  ether(s0).mul(2000*borrowFactor).sub(ether(s1).mul(1000)).mul( ether(1).sub(redeemAmount.mul(ether(1)).div(initZooBalance) ) );
         expectedAvBorrowInDai  = expectedAvBorrowInDai.div(ether(1));
         zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
         expect(zooAaveData.availableBorrowsETH).to.be.approx(expectedAvBorrowInDai.div(2000));  // [out]:  11447631350717186116800/2000
@@ -632,13 +657,20 @@ describe("IssuanceModule", () => {
        * EXPECT debt to decrease by expected amount
        */
       it("Three user issues Zoo against 10000 DAI then Bob redeems all zoo after price change", async ()=>{
-        let leverage = ether(2.4);
         await ctx.configZooWithMockRouter(zToken);
-        let initDaiBalance = ether(10000);
-        let initWethAmount = ether(10);
+        let initDaiBalance = ether(1000);
+        let initWethAmount = ether(1);
+
+        let borrowFactor = 0.8;
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
+        let s1 = leverage - 1;
+        let s0 = leverage - borrowFactor**iters;
+
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), alice);
-        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), oscar);
+        await ctx.issueZoos(zToken, initDaiBalance.mul(3), ether(1000), oscar);
 
         let initZooBalance = await zToken.balanceOf(bob.address);
         let initUserDebt = await zToken.getDebt(bob.address);
@@ -655,12 +687,12 @@ describe("IssuanceModule", () => {
         let zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
 
         // total debt is expected to be halved because of price change 
-        expect(zooAaveData.totalDebtETH).to.be.approx(ether(7.2*3));
+        expect(zooAaveData.totalDebtETH).to.be.approx(ether(s1).div(2).mul(5));
         await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, redeemAmount);
         
         let finalZooBalance = await zToken.balanceOf(bob.address);
         let finalBobWethBalance = await ctx.tokens.weth.balanceOf(bob.address);
-        let expectedBobWethBalance = initDaiBalance.mul(leverage.add(ether(1))).div(ether(2000));
+        let expectedBobWethBalance = initDaiBalance.mul(ether(leverage).add(ether(1))).div(ether(2000));
           // Ensure Debt amount is repaid for bob on redeem
         expect(finalBobWethBalance).to.be.approx(expectedBobWethBalance);    // [out]:
         // User remaining balance of zoo Token  
@@ -676,13 +708,20 @@ describe("IssuanceModule", () => {
        * EXPECT debt to decrease by expected amount
        */
       it("Three user issues Zoo against 10000 DAI then they redeem zoo after price change", async ()=>{
-        let leverage = ether(2.4);
         await ctx.configZooWithMockRouter(zToken);
         let initDaiBalance = ether(10000);
         let initWethAmount = ether(10);
+        
+        let borrowFactor = 0.8;
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
+        let s1 = leverage - 1;
+        let s0 = leverage - borrowFactor**iters;
+
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), alice);
-        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), oscar);
+        await ctx.issueZoos(zToken, initDaiBalance.mul(3), ether(1000), oscar);
 
         let initZooBalance = await zToken.balanceOf(bob.address);
         let initUserDebt = await zToken.getDebt(bob.address);
@@ -708,7 +747,7 @@ describe("IssuanceModule", () => {
           await ctx.tokens.weth.balanceOf(bob.address),
           await ctx.tokens.weth.balanceOf(alice.address),
         ];
-        let expectedWethBalance = initDaiBalance.mul(leverage.add(ether(1))).div(ether(2000));
+        let expectedWethBalance = initDaiBalance.mul(ether(leverage).add(ether(1))).div(ether(2000));
         
         for (let b of finalWethBalances)
             expect(b).to.be.approx(expectedWethBalance);    // [out]:
@@ -726,11 +765,17 @@ describe("IssuanceModule", () => {
        * EXPECT debt to decrease by expected amount on redemption
        */
       it("3 users issues Zoo against 10000 DAI then 2 users redeem zoo, one lose other wins", async ()=>{
-        let leverage = ether(2.4);
         await ctx.configZooWithMockRouter(zToken);
         let initDaiBalance = ether(1000);
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
         await ctx.issueZoos(zToken, initDaiBalance.mul(4), ether(1000), alice);  // Provide enough liquidity
+
+        let borrowFactor = 0.8;
+        let iters = 3;
+        // 1 + sum(borrowFactor**n)     1 <= n <= iters+1
+        let leverage = (1 - borrowFactor**(iters+1)) / (1-borrowFactor);
+        let s1 = leverage - 1;
+        let s0 = leverage - borrowFactor**iters;
 
         let redeemAmount = MAX_UINT_256;
 
@@ -748,7 +793,7 @@ describe("IssuanceModule", () => {
           await zToken.balanceOf(bob.address);
         let finalTraderWethBalance = 
           await ctx.tokens.weth.balanceOf(bob.address);
-        let expectedWethBalance = initDaiBalance.mul( ether(1).add( leverage.mul(600).div(1000) ) ).div(ether(1600));
+        let expectedWethBalance = initDaiBalance.mul( ether(1).add( ether(leverage).mul(600).div(1000) ) ).div(ether(1600));
             
         expect(finalTraderWethBalance).to.be.approx(expectedWethBalance);    // [out]:
         expect(finalTraderZooBalance).to.be.eq(ether(0));
@@ -769,7 +814,7 @@ describe("IssuanceModule", () => {
           await zToken.balanceOf(oscar.address);
         finalTraderWethBalance = 
           await ctx.tokens.weth.balanceOf(oscar.address);
-        expectedWethBalance = initDaiBalance.mul( ether(1).sub( leverage.mul(250).div(1600) ) ).div(ether(1350));
+        expectedWethBalance = initDaiBalance.mul( ether(1).sub( ether(leverage).mul(250).div(1600) ) ).div(ether(1350));
             
         expect(finalTraderWethBalance).to.be.approx(expectedWethBalance);    // [out]:
         expect(finalTraderZooBalance).to.be.eq(ether(0));
@@ -799,7 +844,7 @@ describe("IssuanceModule", () => {
         let initZooBalance = await zToken.balanceOf(bob.address);
         let initUserDebt = await zToken.getDebt(bob.address);
         let zooAaveData = (await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address));
-        let redeemAmount = (await ctx.tokens.weth.balanceOf(zToken.address)).mul(90).div(100);
+        let redeemAmount = (await ctx.tokens.weth.balanceOf(zToken.address)).mul(60).div(100);
 
 
         // initDebt - initDebt*redeemAmount/initZooBalance
@@ -833,7 +878,7 @@ describe("IssuanceModule", () => {
 
         // There's enough liquidity for bob to redeem all his balance
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
-        await ctx.issueZoos(zToken, initDaiBalance.mul(1), ether(1001), alice); 
+        await ctx.issueZoos(zToken, initDaiBalance.mul(3), ether(1001), alice); 
         await ctx.issueZoos(zToken, initDaiBalance.mul(2), ether(1002), oscar);
 
         let initZooBalance = await zToken.balanceOf(bob.address);
@@ -997,7 +1042,7 @@ describe("IssuanceModule", () => {
           expect(feeRecipientBalanceLatest2.sub(feeRecipientBalanceLatest)).to.approx(feeExpected2)
       });
 
-      it.only("issue() after inflation - verify inflation is affected as expected after streaming", async () => {
+      it("issue() after inflation - verify inflation is affected as expected after streaming", async () => {
           let accrueRate = ether(0.2);
           let amountIn = ether(3000);
           let feeRecipientBalance = await zToken.balanceOf(feeRecipient.address);
@@ -1015,6 +1060,8 @@ describe("IssuanceModule", () => {
           
           let multiplier = await zToken.positionMultiplier();
           expect(multiplier).to.be.approx(ether(1).sub(accrueRate));
+
+          // Issue
           await ctx.issueZoos(zToken, amountIn, ether(1000), alice);
           let aliceZooBalance = await zToken.balanceOf(alice.address);
           let bobZooBalance = await zToken.balanceOf(bob.address);
@@ -1023,8 +1070,10 @@ describe("IssuanceModule", () => {
 
           expect(aliceZooBalance).to.be.approx(expectedAliceBalance);
       });
-      // TODO: TODO: redeem after inflation - this to test inflation - do similar example with shorter periods
-      it.only("issue() after inflation - verify inflation is affected as expected after streaming", async () => {
+      /**
+       * 
+       */
+      it.skip("issue() after inflation - verify inflation is affected as expected after streaming", async () => {
           let accrueRate = ether(0.2);
           let amountIn = ether(3000);
           let feeRecipientBalance = await zToken.balanceOf(feeRecipient.address);
@@ -1033,6 +1082,7 @@ describe("IssuanceModule", () => {
           //  Advance timestamp
           await ethers.provider.send('evm_increaseTime', [3600*24*365]);  // one year 
           let totalSupplyBeforeAccrue = await zToken.totalSupply();
+          console.log(await zToken.totalSupply());
           await ctx.ct.streamingFee.accrueFee(zToken.address);
           let feeRecipientBalanceLatest = await zToken.balanceOf(feeRecipient.address);
           let feeExpected =  totalSupplyBeforeAccrue.mul(accrueRate).div(ether(1).sub(accrueRate));
@@ -1042,11 +1092,12 @@ describe("IssuanceModule", () => {
           
           let multiplier = await zToken.positionMultiplier();
           expect(multiplier).to.be.approx(ether(1).sub(accrueRate));
-          // TODO: TODO: Redeem here
           // FIXME:  does not return proportional amount
+          // TODO: TODO: might not need inflation
           let initBobWethBalance = await ctx.tokens.weth.balanceOf(bob.address);
           await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, ether(1));
           let finalBobWethBalance = await ctx.tokens.weth.balanceOf(bob.address);
+          console.log(await zToken.totalSupply());
           console.log(initBobWethBalance.toString());
           console.log(finalBobWethBalance.toString());
           // await ctx.issueZoos(zToken, amountIn, ether(1000), alice);
@@ -1056,6 +1107,38 @@ describe("IssuanceModule", () => {
           // let expectedAliceBalance = bobZooBalance.mul(ether(1)).div(multiplier);
 
           // expect(aliceZooBalance).to.be.approx(expectedAliceBalance);
+      });
+      // TODO: TODO: issue and redeem after inflation
+      // TODO: TODO: redeem with shorter periods
+    });
+
+    describe.only("Collection of views", async function () {
+      // FIXME: ongoing work here -- getExpectedRedeem
+      it("getExposure", async function (){
+        let initDaiBalance = ether(1000);
+        let leverage = 2.95;
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
+        let zooBalance = await zToken.balanceOf(bob.address);
+        expect(zooBalance).to.be.approx(initDaiBalance.mul(ether(leverage)).div(ether(1000)));
+        expect(await ctx.subjectModule.getExposure(zToken.address, bob.address)).to.be.eq(zooBalance.mul(1000));
+      });
+      it("getExposure for bear", async function (){
+        let initDaiBalance = ether(1000);
+        let iters = 3;
+        let alpha = 0.75;
+        let leverage = (1 - alpha**(iters+1)) / (1-alpha);
+        await ctx.issueZoos(bearToken, initDaiBalance, ether(1000), bob);
+        let zooBalance = await bearToken.balanceOf(bob.address);
+        expect(zooBalance).to.be.approx(initDaiBalance.mul(ether(leverage)).div(ether(1)));
+        expect(await ctx.subjectModule.getExposure(bearToken.address, bob.address)).to.be.eq(zooBalance);
+      });
+      it.only("getNAV", async function (){
+        let initDaiBalance = ether(1000);
+        let leverage = 2.95;
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
+        let zooBalance = await zToken.balanceOf(bob.address);
+        expect(zooBalance).to.be.approx(initDaiBalance.mul(ether(leverage)).div(ether(1000)));
+        expect(await ctx.subjectModule.getNAV(zToken.address, bob.address)).to.be.approx(initDaiBalance);
       });
     });
 

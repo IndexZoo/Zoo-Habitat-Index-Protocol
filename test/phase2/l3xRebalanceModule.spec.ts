@@ -17,7 +17,7 @@ import {
 
 const expect = getWaffleExpect();
 
-describe("IssuanceModule", () => {
+describe("L3xRebalanceModule", () => {
   let ctx: Context;
   let zToken: ZooToken;
   let bearToken: ZooToken;
@@ -57,10 +57,12 @@ describe("IssuanceModule", () => {
         let initDaiBalance = ether(1000);
         let initPrice = ether(1000);
         let finalPrice = ether(2000);
-        let leverage = 2.44;
-        let borrowFactor = 1.44;
-        let depositFactor = 1.8;
-        await ctx.issueZoos(zToken, initDaiBalance.mul(8), ether(1000), oscar);  // Provide liquidity
+        let borrowRate = 0.8;
+        let iters = 3;  // number of deposits to Aave
+        let leverage = (1-borrowRate**(iters+1)) / (1-borrowRate);
+        let borrowFactor = leverage-1;
+        let depositFactor = leverage - borrowRate**iters;
+        await ctx.issueZoos(zToken, initDaiBalance.mul(8), ether(1000), oscar);  // Provide liquidity @note 1600 was not enough
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
 
         let zooAaveData = await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address);
@@ -92,7 +94,12 @@ describe("IssuanceModule", () => {
         let initDaiBalance = ether(1000);
         let initPrice = ether(1000);
         let finalPrice = ether(2000);
-        let leverage = 2.44;
+        let borrowRate = 0.8;
+        let iters = 3;  // number of deposits to Aave
+        let leverage = (1-borrowRate**(iters+1)) / (1-borrowRate);
+        let borrowFactor = leverage-1;
+        let depositFactor = leverage - borrowRate**iters;
+        
         await ctx.issueZoos(zToken, initDaiBalance.mul(8), ether(1000), oscar);  // Provide liquidity
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
 
@@ -105,7 +112,7 @@ describe("IssuanceModule", () => {
         await ctx.ct.rebalanceModule.connect(bob.wallet).rebalancePosition(zToken.address);
         await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, MAX_UINT_256  );
 
-        // Expected Redeem Amount in WETH
+        // Expected Redeem Amount in WETH  (Convert to dai to show leveraged profit)
         // expectedRedeemAmount =  (initDai + initDai/initPrice*(finalPrice-initPrice)*leverage) / finalPrice
         let expectedRedeemAmount = initDaiBalance.mul(finalPrice.sub(initPrice)).div(initPrice);
         expectedRedeemAmount = pMul(expectedRedeemAmount, leverage).add(initDaiBalance) ;
@@ -123,7 +130,13 @@ describe("IssuanceModule", () => {
         let initPrice = ether(1000);
         let finalPrice = ether(2000);
         let finalFinalPrice = ether(2500);
-        let leverage = 2.44;
+        
+        let borrowRate = 0.8;
+        let iters = 3;  // number of deposits to Aave
+        let leverage = (1-borrowRate**(iters+1)) / (1-borrowRate);
+        let borrowFactor = leverage-1;
+        let depositFactor = leverage - borrowRate**iters;
+
         await ctx.issueZoos(zToken, initDaiBalance.mul(8), ether(1000), oscar);  // Provide liquidity
         await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
 
@@ -157,6 +170,45 @@ describe("IssuanceModule", () => {
 
         expect(await ctx.tokens.weth.balanceOf(bob.address)).to.be.approx(expectedRedeemAmount);
       });
+      it("Verify Bob ends up with a decreased position size due to loss after calling a rebalance", async () => {
+        // FIXME:  This depends on Liquidation logic
+        let initDaiBalance = ether(1000);
+        let initPrice = ether(1000);
+        let finalPrice = ether(833.33);
+        let borrowRate = 0.8;
+        let iters = 3;  // number of deposits to Aave
+        let leverage = (1-borrowRate**(iters+1)) / (1-borrowRate);
+        let borrowFactor = leverage-1;
+        let depositFactor = leverage - borrowRate**iters;
+        
+        await ctx.issueZoos(zToken, initDaiBalance.mul(8), ether(1000), oscar);  // Provide liquidity
+        await ctx.issueZoos(zToken, initDaiBalance, ether(1000), bob);
 
+        await ctx.aaveFixture.fallbackOracle.setAssetPrice(ctx.tokens.mockDai.address, ether(0.0012)) ;
+        await ctx.mockRouter.setPrice(
+          ctx.tokens.weth.address, 
+          ctx.tokens.mockDai.address, 
+          finalPrice 
+        );
+        let data = await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address);
+        console.log(data.availableBorrowsETH.toString() );
+        await ctx.issueZoos(zToken, initDaiBalance.mul(8), finalPrice, alice);  // Provide liquidity
+        // FIXME: do calculation (might not actually have any allowance to withdraw)
+        data = await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address);
+        console.log(data.totalCollateralETH.toString());
+        console.log(data.availableBorrowsETH.toString() );
+        await ctx.ct.rebalanceModule.connect(bob.wallet).rebalancePosition(zToken.address);
+        data = await ctx.aaveFixture.lendingPool.getUserAccountData(zToken.address);
+        console.log(data.totalCollateralETH.toString());
+        // await ctx.subjectModule.connect(bob.wallet).redeem(zToken.address, MAX_UINT_256  );
+
+        // // Expected Redeem Amount in WETH  (Convert to dai to show leveraged profit)
+        // // expectedRedeemAmount =  (initDai + initDai/initPrice*(finalPrice-initPrice)*leverage) / finalPrice
+        // let expectedRedeemAmount = initDaiBalance.mul(finalPrice.sub(initPrice)).div(initPrice);
+        // expectedRedeemAmount = pMul(expectedRedeemAmount, leverage).add(initDaiBalance) ;
+        // expectedRedeemAmount = expectedRedeemAmount.mul(ether(1)).div(finalPrice);
+
+        // expect(await ctx.tokens.weth.balanceOf(bob.address)).to.be.approx(expectedRedeemAmount);
+      });
     });
 });

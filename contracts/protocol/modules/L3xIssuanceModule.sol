@@ -82,20 +82,18 @@ import "hardhat/console.sol";
   *  - TODO write a require statement to block that
   *  - might require multiple step external call instead
   *  - TODO calculate threshold for which redeems are prohibited
-  *  - Might need admin function to default the token (withdraw colalteral)
+  *  - Might need admin function to default the token (withdraw all colalteral to balance)
   * FIXME: Initialization of ecosystem: suppose 3 users issue tokes and price goes down on bull.
+  *  - FIXME: In that case it won't be possible for new users to issue tokens too
   *  - Users won't be able even to redeem their funds even with loss ! FIX this 
   *  - Depends on liquidation threshold discussion (risk assessment)
-  * FIXME: Borrow only on behalf of users in order to determine the debt for each one properly
   * FIXME: relook positionMultiplier , do it on issue and redeem, Document inflation and Ask Andrew
+  *  - TODO  Document inflation of set-protocol and its inconsistency / Quantify when inflation reaches danger zone
   *  - impose maximum on fee accrue period
-  * FIXME: More deposit for 3x lev
-  * TODO: beforeTokenTransfer
+  * TODO: TODO: Reread SetToken | DebtIssuance 
+  * TODO: TODO: beforeTokenTransfer
+  * TODO: TODO: rebalance bear in win case | rebalance in loss case  NOTE Depends on liquidation
   * TODO: Liquidation Threshold / Test position liquidation directly on Aave
-  * TODO: TODO: reassure inflationFee always less than 1 ether / Quantify when inflation reaches danger zone
-  * TODO: TODO: documenting
-  * TODO: TODO: events for zooToken and ZooStream
-  * TODO: Module viewer - getExposure - get expectedRedeem - show position in terms of base - show liquidation
   * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
   *
   */ 
@@ -117,16 +115,11 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     }
 
     /* ==================== Struct ============================= */
-   
-    /**
-     * Global configuration for module
-     */
     struct GlobalConfig {
         ILendingPool lender;
         IUniswapV2Router router;
         ILendingPoolAddressesProvider addressesProvider;
     }
-
     struct LocalModuleConfig {
         ILendingPool lender;
         IUniswapV2Router router;
@@ -175,13 +168,28 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     /* ==================== Constants ================================ */
 
     uint256 private constant BORROW_PORTION_FACTOR = 0.999 ether;
+
+    // IntegrationRegistry providing calldata for this module
     uint256 private constant INTEGRATION_REGISTRY_RESOURCE_ID = 0;
+
     string private constant AAVE_ADAPTER_NAME = "AAVE";
     uint256 private constant STD_SCALER = 1 ether;
    
     /* ==================== State Variables ========================== */
 
+    /**
+     * Global configuration for module
+     * configuration for all tokens attached to the module (if not having a LocalModuleConfig)
+     * lender i.e. Aave / router i.e. Uniswap
+     */
     GlobalConfig public globalConfig;
+
+    /**
+     * LocalModuleConfig configuration for module
+     * configuration for a selected token 
+     * GlobalConfig makes up for the unconfigured token 
+     * lender i.e. Aave / router i.e. Uniswap
+     */
     mapping(address => LocalModuleConfig) public configs;
 
     /* ============ Constructor ============ */
@@ -220,6 +228,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      * Tokens minted for user (caller) are proportion to the amount deposited and borrowed
      *
 
+     * @param zooToken_     Instance of the ZooToken to configure
      * @param to_               Address of beneficiary receiver of token
      * @param quantity_         Quantity of quote token input to go long 
      * @param price_            price of baseToken (i.e. ETH) in quoteToken (i.e. DAI)
@@ -239,8 +248,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     {
         uint256 depositAmount  = _prepareAmountInForIssue (zooToken_, msg.sender, quantity_, price_, swapFactorx1000_);
         
-        // Borrow quoteToken from lending Protocol
-        // totalAmountOut represents exposure
+        // @note Borrow quoteToken from lending Protocol
+        // @note totalAmountOut represents exposure
         (
             uint256 totalAmountOut, 
             uint256 totalAmountDebt
@@ -273,6 +282,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      *
      * TODO: Check and liquidate all balance if debt is greater than balance of user      
      *
+
+     * @param zooToken_     Instance of the ZooToken to configure
      * @param quantity_         Quantity of token to be redeemed 
      */
     function redeem(
@@ -292,15 +303,15 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         // Deposit Asset (e.g. WETH)
         address dAsset = zooToken_.zooIsBull()? zooToken_.pair().base : zooToken_.pair().quote;
 
-        //@dev NB: Important to calculate currentBalancePortion before withdrawing collateralPortion and debtRepay
+        // @note NB: Important to calculate currentBalancePortion before withdrawing collateralPortion and debtRepay
         uint256 currentBalancePortion = _getUserPortionOfCollateralBalance(zooToken_, quantity_);
         uint256[] memory amountsRepaid = _payUserDebtPortion(zooToken_, quantity_);
         // Withdraw 
         uint256 collateralPortion = _withdrawUserPortionOfTotalCollateral(zooToken_, quantity_);
 
-        uint256 navToBeRedeemed = currentBalancePortion.add(collateralPortion).sub(amountsRepaid[0]);
+        uint256 exposure = currentBalancePortion.add(collateralPortion);
 
-        uint256 nav = _finalizeRedeem(zooToken_, quantity_, navToBeRedeemed, dAsset);
+        uint256 nav = _finalizeRedeem(zooToken_, quantity_, exposure, amountsRepaid[0], dAsset);
 
         emit  Redeemed(
             zooToken_, 
@@ -356,7 +367,13 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     function removeModule() external override {}
 
     /* ============== View Functions ===================*/
+    /**
+     * Get address of LendingPool 
+     * Get configuration stored in GlobalConfig if no LocalModuleConfig for this token is stored
 
+     * @param zooToken_      Instance of the ZooToken to configure
+     * @return ILendingPool  address of lending pool to borrow from and deposit to
+     */
     function getLender(IZooToken zooToken_) public view returns (ILendingPool ) 
     {
         ILendingPool local = configs[address(zooToken_)].lender;
@@ -364,6 +381,13 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
            local: globalConfig.lender; 
     }
 
+    /**
+     * Get address of uniswap-like router 
+     * Get configuration stored in GlobalConfig if no LocalModuleConfig for this token is stored
+
+     * @param zooToken_          Instance of the ZooToken to configure
+     * @return IUniswapV2Router  address of uniswap-like router for swaps 
+     */
     function getRouter(IZooToken zooToken_) public view returns (IUniswapV2Router ) 
     {
         IUniswapV2Router local = configs[address(zooToken_)].router;
@@ -371,11 +395,42 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
            local: globalConfig.router; 
     }
 
+    /**
+     * Get address of addresses provider for LendingPool 
+     * Get configuration stored in GlobalConfig if no LocalModuleConfig for this token is stored
+
+     * @param zooToken_                         Instance of the ZooToken to configure
+     * @return ILendingPoolAddressesProvider    address of  AddressesProvider
+     */
     function getAddressesProvider(IZooToken zooToken_) public view returns (ILendingPoolAddressesProvider ) 
     {
         ILendingPoolAddressesProvider local = configs[address(zooToken_)].addressesProvider;
         return address(local) != address(0)?
            local: globalConfig.addressesProvider; 
+    }
+
+    function getNAV(IZooToken zooToken_, address account_) public view returns(uint256 ) 
+    {
+        return getExposure(zooToken_, account_).sub(zooToken_.getDebt(account_));
+    }
+
+    function getExposure(IZooToken zooToken_, address account_) public view returns (uint256 ) 
+    {
+        uint zoos = zooToken_.balanceOf(account_);
+        if (!zooToken_.zooIsBull()) {
+            // is bearish token
+            return zoos;
+        }
+
+         address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
+
+        // getting price of borrowToken against depositToken 
+        uint256 exposure = zooToken_.getEquivalentAmountViaOraclePrice(
+            oracle, 
+            zoos,
+            [L3xUtils.PPath.DepositAsset, L3xUtils.PPath.BorrowAsset]
+        );    
+        return exposure;       
     }
 
     /* ============ Internal Functions ============ */
@@ -388,7 +443,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      * @param asset_                Address of the underlying token to be borrowed 
      * @param amount_               Amount of underlying token to be borrowed 
      *
-     * return LendingCallInfo             Struct containing data for trade
+     * @return LendingCallInfo             Struct containing data for trade
      */
     function _createLendingCallInfo(
         IZooToken zooToken_,
@@ -411,6 +466,16 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
 
     /* ==================================== Private functions ===================================== */
 
+    /**
+     * Prepare input amount by investor before issuing zoo tokens
+     * Swap input token if zoo token is bullish
+     * @param zooToken_                         Instance of the ZooToken to trade
+     * @param creditor_                         Payer of input amount
+     * @param depositAmountInStableC_           Amount in by creditor
+     * @param depositAssetPrice_                Price of base asset against quote asset
+     * @param swapFactorx1000_                  Account for swapping fees by dex
+     * @return amountOut                        Amount to be initially deposited in LendingPool 
+     */
     function _prepareAmountInForIssue(
         IZooToken zooToken_,
         address creditor_,
@@ -431,6 +496,17 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         }
     }
 
+    /** 
+     * Deposit asset in LendingPool and borrow the other asset against the deposited one.
+     * Process is iterative till achieving required leverage
+
+     * @param zooToken_                         Instance of the ZooToken to trade
+     * @param depositAmount_                    Initial amount to be deposited 
+     * @param swapFactorx1000_                  Account for swapping fees by dex
+     * @param price_                            Price of base asset against quote asset
+     * @return totalAmountOut                   Amount of zoo to be minted for investor 
+     * @return totalAmountDebt                  Amount of debt to be recorded on investor
+     */
     function _iterativeBorrow(
         IZooToken zooToken_,
         uint256 depositAmount_,
@@ -447,7 +523,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         totalAmountOut = depositAmount_;
 
         IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
-        for (uint8 i = 0; i < 2; i++) {
+        for (uint8 i = 0; i < 3; i++) {
             borrowAmount = _borrowAgainstCollateral(zooToken_, depositAmount_ );
             depositAmount_ = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, price_));
 
@@ -457,32 +533,52 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
 
     }
 
+    /**
+     * Mint zoo token
+     * @param zooToken_                         Instance of the ZooToken to trade
+     * @param to_                               Address of investor to_ to receive zoo token
+     * @param exposure_                         Amount to be minted (before inflating)
+     * @param debt_                             Debt to be incurred on to_
+     */
     function _mintZoos(
         IZooToken zooToken_,
         address to_,
         uint256 exposure_,
-        uint256 debt
+        uint256 debt_
     )
     private 
     {
-        zooToken_.addDebt(to_, debt);
+        zooToken_.addDebt(to_, debt_);
         uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
         uint256 mints = exposure_.mul(PreciseUnitMath.preciseUnit()).div(positionMultiplier);
         zooToken_.mint(to_, mints);
         require(mints !=  0, "L3xIssueMod: Leveraging failed");
     }
 
+    /**
+     * 
+     * @param zooToken_                         Instance of the ZooToken to trade
+     * @param quantity_                         Amount of zoo to be burnt 
+     * @param exposure_                         ..  
+     * @param debt_                             ..
+     * @param dAsset_                           Address of deposited Asset
+     * @return nav
+     */
     function _finalizeRedeem (
         IZooToken zooToken_,
         uint256 quantity_,
-        uint256 redeems_,
+        uint256 exposure_,
+        uint256 debt_, 
         address dAsset_
     ) 
     private 
     returns (uint256 nav)
     {
         uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
-        nav = redeems_.mul(positionMultiplier).div(PreciseUnitMath.preciseUnit());
+        // console.log(exposure_);
+        exposure_ = exposure_.mul(positionMultiplier).div(PreciseUnitMath.preciseUnit());
+        nav = exposure_.sub(debt_);
+        // console.log(nav);
 
         zooToken_.burn(msg.sender, quantity_);
         zooToken_.transferAsset(IERC20(dAsset_), msg.sender, nav);
