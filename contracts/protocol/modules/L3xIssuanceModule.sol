@@ -75,7 +75,7 @@ import "hardhat/console.sol";
   * Zoo is bear when BaseToken becomes the borrow asset and QuoteToken (stable coin) becomes the deposit asset
   * Zoo is bull when BaseToken becomes the deposit asset and QuoteToken becomes the borrow asset
   *
-  * Rebalancing is carried out in separate module
+  * Rebalancing is carried out in separate module for bear and bull trades
   *
   *
   * FIXME: Last withdrawal edge case, in which you need to do successive withdrawals and repay
@@ -87,14 +87,13 @@ import "hardhat/console.sol";
   *  - FIXME: In that case it won't be possible for new users to issue tokens too
   *  - Users won't be able even to redeem their funds even with loss ! FIX this 
   *  - Depends on liquidation threshold discussion (risk assessment)
+  *  - rebalance in loss case  NOTE Depends on liquidation
   * FIXME: relook positionMultiplier , do it on issue and redeem, Document inflation and Ask Andrew
   *  - TODO  Document inflation of set-protocol and its inconsistency / Quantify when inflation reaches danger zone
   *  - impose maximum on fee accrue period
-  * TODO: TODO: Reread SetToken | DebtIssuance 
   * TODO: TODO: beforeTokenTransfer
-  * TODO: TODO: rebalance bear in win case | rebalance in loss case  NOTE Depends on liquidation
   * TODO: Liquidation Threshold / Test position liquidation directly on Aave
-  * TODO: put an argument for minimum quantity of token to receive from Issue (slippage)
+  * DONE: put an argument for minimum quantity of token to receive from Issue (slippage)
   *
   */ 
 
@@ -228,33 +227,26 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      * Tokens minted for user (caller) are proportion to the amount deposited and borrowed
      *
 
-     * @param zooToken_     Instance of the ZooToken to configure
-     * @param to_               Address of beneficiary receiver of token
-     * @param quantity_         Quantity of quote token input to go long 
-     * @param price_            price of baseToken (i.e. ETH) in quoteToken (i.e. DAI)
-     * @param swapFactorx1000_  The accepted portion of quantity_ to get through after deduction from fees. 
-     * This is taking place during the processes of swapping & borrowing (i.e. about 985)
+     * @param zooToken_                  Instance of the ZooToken to configure
+     * @param to_                        Address of beneficiary receiver of token
+     * @param quantity_                  Quantity of quote token input to go long 
+     * @param maxAmountIn_               Max amount in to be charged from caller 
+     * @param minAmountOut_              Min amount out to be minted to recipient (to_)
      */
     function issue (
         IZooToken zooToken_,
         address to_,
         uint256 quantity_,
-        uint256 price_,
-        uint256 swapFactorx1000_  // TODO: to be replaced by slippage
+        uint256 maxAmountIn_,
+        uint256 minAmountOut_
     )
         external
         nonReentrant
         onlyValidAndInitializedSet(zooToken_)
     {
-        uint256 depositAmount  = _prepareAmountInForIssue (zooToken_, msg.sender, quantity_, price_, swapFactorx1000_);
-        
-        // @note Borrow quoteToken from lending Protocol
-        // @note totalAmountOut represents exposure
-        (
-            uint256 totalAmountOut, 
-            uint256 totalAmountDebt
-        )  =  _iterativeBorrow(zooToken_, depositAmount, swapFactorx1000_, price_);
-        _mintZoos(zooToken_, to_, totalAmountOut, totalAmountDebt);
+        uint256 amountIn = _calculateRequiredComponentIssuanceQuantities(zooToken_, quantity_, true);
+        require(amountIn <= maxAmountIn_, "L3xIssuance: amountIn maxed out");
+        _resolveEquityAndDebtPositions(zooToken_, amountIn, to_, true, minAmountOut_);
 
         emit  Issued(
             zooToken_, 
@@ -353,7 +345,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     external
     onlySetManager(IZooToken(zooToken_), msg.sender)
     {
-        // TODO: do not allow to change lender
+        // TODO: TODO: do not allow to change lender
         uint256 amountPerUnitCollateral = config_.amountPerUnitCollateral;
         require(amountPerUnitCollateral > 0, "Zero amountPerCollateral unallowed");
         configs[zooToken_].addressesProvider = config_.addressesProvider;
@@ -471,29 +463,114 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
      * Swap input token if zoo token is bullish
      * @param zooToken_                         Instance of the ZooToken to trade
      * @param creditor_                         Payer of input amount
-     * @param depositAmountInStableC_           Amount in by creditor
-     * @param depositAssetPrice_                Price of base asset against quote asset
-     * @param swapFactorx1000_                  Account for swapping fees by dex
+     * @param depositAmountIn_                  Amount in by creditor
      * @return amountOut                        Amount to be initially deposited in LendingPool 
      */
     function _prepareAmountInForIssue(
         IZooToken zooToken_,
         address creditor_,
-        uint256 depositAmountInStableC_,
-        uint256 depositAssetPrice_,
-        uint256 swapFactorx1000_
+        uint256 depositAmountIn_
     )
     private
     returns (uint256 amountOut) 
     {
-        IERC20(zooToken_.pair().quote).transferFrom(creditor_, address(zooToken_), depositAmountInStableC_);
-        if(zooToken_.zooIsBull()){
+        address assetIn = zooToken_.zooIsBull()? zooToken_.pair().quote:zooToken_.pair().base;
+        SafeERC20.safeTransferFrom(IERC20(assetIn), creditor_, address(zooToken_), depositAmountIn_);
+        // IERC20(assetIn).transferFrom(creditor_, , depositAmountIn_);
+        // if(zooToken_.zooIsBull()){
            IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
-           amountOut = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), depositAmountInStableC_, _multiplyByFactorSwap(depositAmountInStableC_, swapFactorx1000_, depositAssetPrice_)); 
+        //    amountOut = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), depositAmountInStableC_, _multiplyByFactorSwap(depositAmountInStableC_, swapFactorx1000_, depositAssetPrice_)); 
+           amountOut = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), depositAmountIn_, 0 ); 
+        // }
+        // else {
+        //     amountOut = depositAmountInStableC_;
+        // }
+    }
+
+    function _resolveEquityAndDebtPositions(
+        IZooToken zooToken_,
+        uint256 amountIn,
+        address to_,
+        bool isIssue_,
+        uint256 minAmountOut_
+    )
+    internal 
+    {
+        uint256 depositAmount  = _prepareAmountInForIssue (zooToken_, msg.sender, amountIn);
+        // @note Borrow quoteToken from lending Protocol
+        // @note totalAmountOut represents exposure
+        (
+            uint256 exposure, 
+            uint256 debt
+        )  =  _iterativeBorrow(zooToken_, depositAmount );
+        _mintZoos(zooToken_, to_, exposure, debt);
+        require(exposure >= minAmountOut_ , "L3xIssuance: not enough amountOut");
+    }
+
+    function _calculateRequiredComponentIssuanceQuantities(
+        IZooToken zooToken_,
+        uint256 quantity_,
+        bool isIssue_
+    )
+    private 
+    view
+    returns (uint256 amountIn) 
+    {
+        // uint256 swapFactor = _swapFactor(zooToken_);
+        // uint256 price = _priceViaOracle(zooToken_);
+        // uint256 prod = configs[address(zooToken_)].amountPerUnitCollateral.preciseMul(swapFactor).preciseMul(price);
+
+        // uint256 t0 = prod.preciseMul(prod).preciseMul(prod).preciseMul(prod);
+        // t0 = STD_SCALER.sub(t0);
+        // amountIn = (STD_SCALER.sub(prod)).preciseMul(quantity_).preciseDiv(swapFactor);
+        // amountIn = amountIn.preciseDiv(t0);
+
+        address[] memory path = new address[](2);
+        path[0] = zooToken_.zooIsBull() ? zooToken_.pair().quote : zooToken_.pair().base; 
+        path[1] = zooToken_.zooIsBull() ? zooToken_.pair().base : zooToken_.pair().quote;
+        address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
+        uint256 swapped; uint256 beSwapped = STD_SCALER;
+        swapped =  getRouter(zooToken_).getAmountsOut(beSwapped, path)[1];  // Swap factor fee
+        uint256 total  = swapped ;
+        for (uint8 i=0; i < 3; i++) {
+            beSwapped = zooToken_.getEquivalentAmountViaOraclePrice(
+                oracle, 
+                swapped,
+                [L3xUtils.PPath.DepositAsset, L3xUtils.PPath.BorrowAsset]
+            ).preciseMul(configs[address(zooToken_)].amountPerUnitCollateral);
+            swapped =  getRouter(zooToken_).getAmountsOut(beSwapped, path)[1];  // Swap factor fee
+            total = total.add(swapped);
         }
-        else {
-            amountOut = depositAmountInStableC_;
-        }
+        amountIn = quantity_.preciseDivCeil(total);
+    }
+
+    function _priceViaOracle(
+        IZooToken zooToken_
+    )
+    private 
+    view
+    returns (uint256 price) 
+    {
+        address bAsset = zooToken_.zooIsBull() ? zooToken_.pair().quote : zooToken_.pair().base; 
+        address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base : zooToken_.pair().quote;
+        address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
+        uint256 bAssetPriceInETH = IPriceOracleGetter(oracle).getAssetPrice(bAsset); 
+        uint256 dAssetPriceInETH = IPriceOracleGetter(oracle).getAssetPrice(dAsset);
+        price = dAssetPriceInETH.preciseDiv(bAssetPriceInETH);
+    }
+
+    function _swapFactor(
+        IZooToken zooToken_
+    ) 
+    private
+    view
+    returns (uint256 swapFactor) 
+    {
+        address[] memory path = new address[](2);
+        path[0] = zooToken_.zooIsBull() ? zooToken_.pair().quote : zooToken_.pair().base; 
+        path[1] = zooToken_.zooIsBull() ? zooToken_.pair().base : zooToken_.pair().quote;
+
+        swapFactor =  getRouter(zooToken_).getAmountsOut(STD_SCALER, path)[1];  // Swap factor fee
     }
 
     /** 
@@ -502,16 +579,12 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
 
      * @param zooToken_                         Instance of the ZooToken to trade
      * @param depositAmount_                    Initial amount to be deposited 
-     * @param swapFactorx1000_                  Account for swapping fees by dex
-     * @param price_                            Price of base asset against quote asset
      * @return totalAmountOut                   Amount of zoo to be minted for investor 
      * @return totalAmountDebt                  Amount of debt to be recorded on investor
      */
     function _iterativeBorrow(
         IZooToken zooToken_,
-        uint256 depositAmount_,
-        uint256 swapFactorx1000_,
-        uint256 price_
+        uint256 depositAmount_
     )
     private
     returns (
@@ -525,7 +598,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         IExchangeAdapterV3 adapter = IExchangeAdapterV3(getAndValidateAdapter("UNISWAP"));
         for (uint8 i = 0; i < 3; i++) {
             borrowAmount = _borrowAgainstCollateral(zooToken_, depositAmount_ );
-            depositAmount_ = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, price_));
+            // depositAmount_ = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), borrowAmount, _multiplyByFactorSwap(borrowAmount, swapFactorx1000_, price_));
+            depositAmount_ = zooToken_.swapQuoteAndBase(adapter, getRouter(zooToken_), borrowAmount, 0); 
 
             totalAmountOut = totalAmountOut.add(depositAmount_);
             totalAmountDebt = totalAmountDebt.add(borrowAmount);
@@ -575,10 +649,8 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     returns (uint256 nav)
     {
         uint256 positionMultiplier = uint256(zooToken_.positionMultiplier());
-        // console.log(exposure_);
         exposure_ = exposure_.mul(positionMultiplier).div(PreciseUnitMath.preciseUnit());
         nav = exposure_.sub(debt_);
-        // console.log(nav);
 
         zooToken_.burn(msg.sender, quantity_);
         zooToken_.transferAsset(IERC20(dAsset_), msg.sender, nav);
@@ -633,6 +705,7 @@ contract L3xIssuanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         address[] memory path = new address[](2);
         path[0] = zooToken_.zooIsBull() ? zooToken_.pair().quote : zooToken_.pair().base; 
         path[1] = zooToken_.zooIsBull() ? zooToken_.pair().base : zooToken_.pair().quote; 
+        // console.log(userDebtInBorrowAsset);
         uint256 userDebtInDepositAsset =  getRouter(zooToken_).getAmountsOut(userDebtInBorrowAsset, path)[1];
         
         uint256 debtToRepayInDepositAssetCeil = quantity_.mul(userDebtInDepositAsset).div(userZooBalance); 

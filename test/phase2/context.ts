@@ -156,10 +156,32 @@ class Context {
         } while(redeemAmount !== MAX_UINT_256)
   }
 
-  public async issueZoos(zoo: ZooToken, amount: BigNumber, price: BigNumber, to: Account): Promise<void> {
-       await this.tokens.mockDai.mint(to.address, amount);
-       await this.tokens.mockDai.connect(to.wallet).approve(this.subjectModule.address, amount);
-       await this.subjectModule.connect(to.wallet).issue(zoo.address, to.address, amount, price,  985);
+  public async issueZoos(
+    zoo: ZooToken, 
+    quantity: BigNumber, 
+    leverage: number, 
+    to: Account, 
+    maxAmountIn: BigNumber = ether(1100),
+    price?: number 
+  ): Promise<void> {
+      let amountToMintIn = maxAmountIn;
+      if(maxAmountIn === MAX_UINT_256 && price != undefined)
+          amountToMintIn = quantity.mul(ether(price*1.4)).div(ether(leverage));
+      if(await zoo.side() == 0) {
+        // Bull
+        await this.tokens.mockDai.mint(to.address, amountToMintIn);
+        await this.tokens.mockDai.connect(to.wallet).approve(this.subjectModule.address, MAX_UINT_256);
+      } else {
+        await this.tokens.weth.connect(to.wallet).deposit({value: amountToMintIn});
+        await this.tokens.weth.connect(to.wallet).approve(this.subjectModule.address, MAX_UINT_256);
+      }
+       await this.subjectModule.connect(to.wallet).issue(
+         zoo.address, 
+         to.address, 
+         quantity, 
+         maxAmountIn,
+         quantity.mul(ether(0.95 )).div(ether(1)) 
+       );
   }
 
   public async configureZoo(zoo: ZooToken, amountPerUnitCollateral: BigNumber): Promise<void> {

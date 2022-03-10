@@ -159,8 +159,6 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     external
     onlyValidAndInitializedSet(zooToken_)
     {
-        // FIXME: TODO consider gains vs losses - bear vs bull 
-
         uint256 bpd = configs[address(zooToken_)].amountPerUnitCollateral;
         uint256 zoos = zooToken_.balanceOf(msg.sender);
         uint256 debt = zooToken_.getDebt(msg.sender);
@@ -189,7 +187,7 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
                 zooToken_.getDebt(msg.sender)
             );
         }  else {
-            // FIXME: dependency -> liquidation Module (i.e. it requires healthy token)
+            // NOTE dependency -> liquidation Module (i.e. it requires healthy token)
             uint256[] memory amountsRepaid = _repayDebtForUser(zooToken_, amount.mul(1000).div(900), amount);
             uint256 withdrawAmount = _withdrawPortion(zooToken_, zoos, debt, bpd);
 
@@ -233,7 +231,7 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     external
     onlySetManager(IZooToken(zooToken_), msg.sender)
     {
-        // TODO: do not allow to change lender
+        // TODO: TODO: do not allow to change lender
         uint256 amountPerUnitCollateral = config_.amountPerUnitCollateral;
         require(amountPerUnitCollateral > 0, "Zero amountPerCollateral unallowed");
         configs[zooToken_].addressesProvider = config_.addressesProvider;
@@ -309,7 +307,7 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     private 
     returns (uint256 borrowAmountOut) 
     {
-        address bAsset = zooToken_.pair().quote;
+        address bAsset= zooToken_.zooIsBull()?  zooToken_.pair().quote: zooToken_.pair().base;
         L3xUtils.LendingCallInfo memory borrowInfo = _createLendingCallInfo(
             zooToken_, 
             AAVE_ADAPTER_NAME, 
@@ -356,7 +354,6 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
             dAsset, 
             withdrawAmount_
         );
-        // TODO: NOTE: Just do not do if you don't have enough collateral 
         withdrawInfo.invokeWithdraw();
     }
 
@@ -369,7 +366,7 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     private
     returns (uint256 depositAmount_)
     {
-        address dAsset = zooToken_.pair().base;
+        address dAsset = zooToken_.zooIsBull()? zooToken_.pair().base: zooToken_.pair().quote;
 
         uint256 depositAmount = _calculateDepositOrWithdrawAmount(exposure_, debt_, bpd_, true);
         address oracle =  getAddressesProvider(zooToken_).getPriceOracle();
@@ -437,7 +434,7 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         uint256 x = debt_.preciseDiv(s1);    // initial price
         uint256 x_ = exposure_.preciseDiv(s2);
         
-        uint256 priceJump = x_.preciseDiv(x); // TODO:  if less than 1 ether (i.e. loss) do withdraw and repay
+        uint256 priceJump = x_.preciseDiv(x); // 
         uint256 delta = isBorrow? priceJump.sub(STD_SCALER) : STD_SCALER.sub(priceJump);
         
         uint256 depositAmount = s0.preciseMul(s1); 
@@ -445,19 +442,6 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
         depositAmount = depositAmount.preciseMul(delta); 
         return depositAmount;
     }
-
-    function _multiplyByFactorSwap(
-        uint256 amount_,
-        uint256 factorx1000_,
-        uint256 price_
-    )
-    private
-    pure
-    returns (uint256)
-    {
-        return amount_.mul(factorx1000_).div(1000).preciseDiv(price_);
-    }
-
 
     /**
      * Repay debt on Aave by swapping baseToken to quoteToken in order to repay
@@ -470,7 +454,7 @@ contract L3xRebalanceModule is  ModuleBase, ReentrancyGuard, Ownable {
     private 
     returns (uint256 [] memory amounts)
     {
-        // FIXME: work on here -- deltaDebt
+        // TODO: That part depends on liquidation -- to have enough liguidity for handling the loss 
         address bAsset = zooToken_.zooIsBull() ? zooToken_.pair().quote:zooToken_.pair().base; // borrowToken
         address dAsset = zooToken_.zooIsBull() ? zooToken_.pair().base:zooToken_.pair().quote; // depositToken
         IUniswapV2Router router_ = getRouter(zooToken_); 
