@@ -18,3 +18,17 @@ TradeModule address:  0x01159F31523bF949Ca5b9bfFb493245810059452
 StreamingFeeModule address:  0xD4651d83438d6834248A9154b001A86186DC0EaE
 SingleIndexModule address:  0x0cBa25d10b6D2B3bF524dd7490bb3943C0b575dA
 uniswapRouter V2:  0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F
+
+
+
+  code: refactor structure  PR1
+
+ feat: IntegrationRegistry tested PR2
+
+
+Economic questions:
+
+- In case of redeem after losses leading to decaying collateral value. How much to withdraw from aave collateral, how much debt to repay and on how many steps
+
+- 
+

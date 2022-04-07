@@ -49,6 +49,7 @@ contract ModuleIssuanceHookMock is IModuleIssuanceHook {
         IERC20 _component,
         bool /* _isEquity */
     ) external override {
+        // TODO: restrict calls
         int256 externalPositionUnit = _setToken.getExternalPositionRealUnit(address(_component), address(this));
         uint256 totalNotionalExternalModule = _setTokenQuantity.preciseMul(externalPositionUnit.toUint256());
 
