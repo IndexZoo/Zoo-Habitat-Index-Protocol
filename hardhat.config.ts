@@ -13,6 +13,7 @@ import "./tasks";
 
 
 const UNISWAPROUTER_ADDRESS = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";  // mainnet, rinkbey, kovan
+const DAI_ADDRESS = "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063";
 
 const forkingConfig = {
   url: `https://eth-mainnet.alchemyapi.io/v2/${process.env.ALCHEMY_TOKEN}`,
@@ -70,8 +71,10 @@ const config: HardhatUserConfig = {
       // @ts-ignore
       accounts: [`0x${process.env.PRODUCTION_LOWFEE_DEPLOY_PRIVATE_KEY}`],
       // @ts-ignore
-      uniswapRouterAddress: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",  // Sushiswap 
-      weth: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" 
+      uniswapRouterAddress: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",  // Sushiswap 
+      weth: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      dai: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
+      wmatic: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"
     },
      // To update coverage network configuration got o .solcover.js and update param in providerOptions field
     coverage: {

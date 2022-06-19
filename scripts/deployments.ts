@@ -16,11 +16,29 @@ const DEPLOYMENTS =  {
     },
     mainnet: {
         UniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-        SushiswapRouter: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",
+        SushiswapRouter: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
         WETH: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
         MATIC: "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0",
         USDT: "0xdac17f958d2ee523a2206206994597c13d831ec7",
-        DAI: "0x6b175474e89094c44da98b954eedeac495271d0f"
+        DAI: "0x6b175474e89094c44da98b954eedeac495271d0f",
+        SetTokenCreator :  "0x20c4F9a8086125cbE8490F7493F3B506d4B7043e",
+        BasicIssuanceModule :  "0x507723DfdD9eE51f06D1E3E74585f80604766875",
+        UniswapV2ExchangeAdapter:  "0x9fb8E1A9E38b16E9404CBB82a0B9e36531309484",
+        TradeModule :  "0x01159F31523bF949Ca5b9bfFb493245810059452"
+    },
+    mainnet2: {
+        UniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        SushiswapRouter: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+        WETH: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        MATIC: "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0",
+        USDT: "0xdac17f958d2ee523a2206206994597c13d831ec7",
+        DAI: "0x6b175474e89094c44da98b954eedeac495271d0f",
+        Controller: "0xB8E1eBF8874186b5E44CFAbf1eE2d9323D039112",
+        SetTokenCreator :  "0x20c4F9a8086125cbE8490F7493F3B506d4B7043e",
+        BasicIssuanceModule :  "0xbed2073217E981Dc2784145D475d5d4B2C010626",
+        UniswapV2ExchangeAdapter:  "0xD63DAC5287e02FA805B540451d260F0e8FE34A02",
+        TradeModule :  "0x015D136E90A41F428400C3871eeF840Feed13f6D",
+        DAIMTC: "0x8b546EAbDbe44826d58D39a046aC6557103FaA24"
     }
 }
 

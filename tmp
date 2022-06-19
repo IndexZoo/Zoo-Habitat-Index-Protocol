@@ -19,6 +19,17 @@ StreamingFeeModule address:  0xD4651d83438d6834248A9154b001A86186DC0EaE
 SingleIndexModule address:  0x0cBa25d10b6D2B3bF524dd7490bb3943C0b575dA
 uniswapRouter V2:  0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F
 
+Polygon-2
+Controller address:  0xB8E1eBF8874186b5E44CFAbf1eE2d9323D039112
+integrationRegistry address:  0xFd826814Dca5fcB5D43721d755375F020Fe27FD1
+SetTokenCreator address:  0x78b5989603c34F6fEbC9d03Cd7b798155514737c
+BasicIssuanceModule address:  0xbed2073217E981Dc2784145D475d5d4B2C010626
+UniswapV2ExchangeAdapter address: 0xD63DAC5287e02FA805B540451d260F0e8FE34A02 
+TradeModule address:  0x015D136E90A41F428400C3871eeF840Feed13f6D
+StreamingFeeModule address:  0xdf115445c2cA4211fF67aA2567f24724E24A8D2C
+SingleIndexModule address:  0x94CcD8C6f4402c8743670E60cCF8725Dc23be1C5
+uniswapRouter V2:  0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506
+
 
 
   code: refactor structure  PR1
