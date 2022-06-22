@@ -36,17 +36,20 @@ async function tradeScenario() {
     const netConfig = hre.network.config as HreDto;
     const deployer: SignerWithAddress = (await ethers.getSigners())[0];
 
+    // Get factories of contracts
     let setToken = await ethers.getContractAt(SETTOKENABI, DEPLOYMENTS.mainnet2.DAIMTC) as SetToken;
-    let wmaticToken = await ethers.getContractAt(ERC20ABI, netConfig.wmatic) as ERC20;
-    let daiToken = await ethers.getContractAt(ERC20ABI, netConfig.dai) as ERC20;
+    let wmaticToken = await ethers.getContractAt(ERC20ABI, netConfig.wmatic) as ERC20;   // Wrapped Matic
+    let daiToken = await ethers.getContractAt(ERC20ABI, netConfig.dai) as ERC20;          // dai
     let basicIssuanceModule = await ethers.getContractAt(BASICISSUANCEMODULEABI, DEPLOYMENTS.mainnet2.BasicIssuanceModule) as BasicIssuanceModule;
     let tradeModule = await ethers.getContractAt(TRADEMODULEABI, DEPLOYMENTS.mainnet2.TradeModule) as TradeModule;
 
     await wmaticToken.approve(basicIssuanceModule.address, ether(0.1));
     await daiToken.approve(basicIssuanceModule.address, ether(0.1));
+    // in order to issue 1 index we pay 0.001 WMatic and 0.002 Dai
 
     // await basicIssuanceModule.issue(setToken.address, ether(1), deployer.address);  // paid ether(0.001)
 
+    // Trade using Sushiswap  Wrapped Matic for Dai. Matic Quantity = 0.0005 traded for equivalent dai
     await tradeModule.trade(
       setToken.address,
       "SUSHI",

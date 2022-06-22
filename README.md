@@ -6,6 +6,7 @@
 </p>
 
 # Doc
+
 ## SetTokenCreator
 SetTokenCreator is a smart contract used to deploy new SetToken contracts. The SetTokenCreator is a Factory contract that is enabled by the controller to create and register new SetTokens.
 ### **create**
